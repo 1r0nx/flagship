@@ -1,9 +1,5 @@
-# secrets — ne jamais versionner le token
+# secret — ne jamais versionner le token
 config.sh
-
-# arborescences de CTF générées
-*/
-!flagship/
 
 # python
 __pycache__/
@@ -14,3 +10,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+
+# au cas où tu lances Flagship avec BASE_DIR=. dans CE dossier (déconseillé) :
+.flagship/
+CHALLENGES/
