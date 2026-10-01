@@ -172,5 +172,11 @@ def _stream_to(r: "requests.Response", dest, max_bytes: int) -> tuple[str, str]:
                     return "manual", "> 2 Go (interrompu)"
                 f.write(chunk)
     except (OSError, requests.RequestException) as e:
+        # supprimer le fichier partiel pour qu'un futur retry puisse le re-télécharger
+        try:
+            import os
+            os.remove(dest)
+        except OSError:
+            pass
         return "error", str(e)
     return "ok", f"{written} o"

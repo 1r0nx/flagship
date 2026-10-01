@@ -41,9 +41,9 @@ Markers: `✔`/`○` solved · `✓`/`⬇` downloaded · `pt · N✓` points and
      **points** and **solve count**; detail with **first blood**, connection, files, hints;
      description viewable **without** downloading; **search** (`/`), **filters** (`f`:
      all/unsolved/solved), **sort** (`o`: category/points/solves); **submission** (`flag.txt`
-     written if correct), **download**/retry (`d`), **"Sync all"** (`D`, parallel + progress bar),
+     written if correct), **download / update** (`d`), **"Sync all"** (`D`, parallel + progress bar),
      **hint unlock** (`u`), **copy connection** (`c`), **notes** (`e`, `notes.md`),
-     **export PROGRESS.md** (`p`). The header shows **your score and rank**.
+     **export `PROGRESS_flagship.md`** (`p`, never overwrites your PROGRESS.md). The header shows **your score and rank**.
    - **Scoreboard**: ranking (position, team/player, score); **your row is highlighted** and the
      cursor jumps to it.
    - **Themes**: several color themes (light/dark: nord, gruvbox, dracula…), `t` to cycle,
@@ -163,7 +163,7 @@ tool every time (less convenient).
 |-----|--------|
 | `↑`/`↓`, Enter | navigate / open a challenge (shows the brief, without downloading) |
 | click the tabs | switch Challenges ↔ Scoreboard |
-| `d` | **download** the selected one (or **re-download/retry** if already there) |
+| `d` | **download / update** the selected one (recreates `desc.txt` if missing, completes missing files in `work/`) |
 | `D` | **Sync all** (parallel + progress bar, confirmation) |
 | `/` | focus the search bar |
 | `r` | refresh the list now (+ scoreboard + rank) |
@@ -174,7 +174,7 @@ tool every time (less convenient).
 | `u` | unlock a hint (confirmation) |
 | `c` | copy the challenge's connection (`nc …`/URL) |
 | `e` | edit the challenge **notes** (`notes.md`, `$EDITOR`) |
-| `p` | export a **PROGRESS.md** summary |
+| `p` | export a summary to **`PROGRESS_flagship.md`** (never touches your `PROGRESS.md`) |
 | `n` | show the notifications history |
 | `Esc` | leave an input field (search/flag) → focus back to the list |
 | `Tab` / `Shift+Tab` | move focus to the next/previous element |
@@ -243,8 +243,9 @@ is downloaded, Flagship places its files in **`work/`** and writes a `downloads.
 | File **> 2 GB** | not downloaded → `manual` (grab it yourself) |
 
 - **"Sync all"** (`D`) downloads **in parallel** (`DOWNLOAD_WORKERS`) with a **progress bar**.
-- **`d` on an already-downloaded challenge** = **retry**: re-attempts only the missing/failed
-  files (see `downloads.txt`).
+- **`d` is self-healing**: it **recreates `desc.txt`** if missing (e.g. emptied folder) and
+  **completes missing/failed files** in `work/` (idempotent — files already there are skipped).
+  Never `work/`/`downloads.txt` without `desc.txt`.
 - Your **CTFd token is never sent to a third-party host** (Drive, MEGA…). The Drive guard is
   checked *after the fact* (gdown doesn't know the size upfront).
 

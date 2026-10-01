@@ -128,6 +128,8 @@ class Flagship(App):
         self._fb_cache: dict[int, str | None] = {}
         self.notifications: list[str] = []
         self._first_sync = True
+        self._syncing = False               # True pendant « Tout synchroniser » (évite l'annulation par le poll)
+        self._tree_sig = None               # signature des données affichées (évite les rebuilds inutiles)
         self._log_path = cfg.base_dir / ".flagship" / "notifications.log"
         self._state_path = cfg.base_dir / ".flagship" / "state.json"
 
@@ -210,6 +212,8 @@ class Flagship(App):
     # -- workers réseau --------------------------------------------------
     @work(thread=True, exclusive=True, group="sync")
     def list_worker(self) -> None:
+        if self._syncing:  # une synchro complète est en cours : ne pas interférer
+            return
         try:
             challenges, events = store.list_state(
                 self.client, self.cfg.base_dir, self.cfg.watch_changes, self.cfg.auto_unlock_free_hints)
@@ -239,8 +243,9 @@ class Flagship(App):
         if self._last_scoreboard:  # re-surligner ta ligne sans refetch
             self._fill_scoreboard(self._last_scoreboard)
 
-    @work(thread=True, exclusive=True, group="sync")
+    @work(thread=True, exclusive=True, group="syncall")  # groupe distinct : non annulé par le poll/list
     def sync_all_worker(self) -> None:
+        self._syncing = True
         self.call_from_thread(self._show_progress, True)
 
         def progress(done, total):
@@ -252,12 +257,13 @@ class Flagship(App):
                 self.client, self.cfg.base_dir, self.cfg.watch_changes,
                 self.cfg.auto_unlock_free_hints, self.cfg.download_workers, progress)
         except CTFdError as e:
-            self.call_from_thread(self._show_progress, False)
             self.call_from_thread(self._emit, f"Sync complète impossible : {e}", "error", 6)
             return
+        finally:
+            self._syncing = False
+            self.call_from_thread(self._show_progress, False)
         n = sum(1 for c in challenges if c.get("downloaded"))
         self.call_from_thread(self._apply_challenges, challenges, events)
-        self.call_from_thread(self._show_progress, False)
         self.call_from_thread(self._emit, f"✅ Sync complète : {n} challenges téléchargés.", "information", 6)
 
     def _show_progress(self, on: bool) -> None:
@@ -270,25 +276,24 @@ class Flagship(App):
         self.query_one("#progress", ProgressBar).update(total=total, progress=done)
 
     @work(thread=True, exclusive=True, group="download")
-    def download_worker(self, summary: dict, retry: bool = False) -> None:
+    def download_worker(self, summary: dict) -> None:
         try:
-            if retry:
-                report = store.redownload(self.client, self.cfg.base_dir, summary, self.cfg.auto_unlock_free_hints)
-                ok = sum(1 for r in report if r.startswith("[ok]"))
-                self.call_from_thread(self._emit, f"↻ {summary.get('name','?')} : {ok} fichier(s) OK", "information", 5)
-                events = []
-            else:
-                path, events = store.download_one(
-                    self.client, self.cfg.base_dir, summary, self.cfg.watch_changes, self.cfg.auto_unlock_free_hints)
-                for c in self.challenges:
-                    if int(c.get("id", -1)) == int(summary["id"]):
-                        c["downloaded"] = True
-                        c["path"] = path
-                self.call_from_thread(self._emit, f"⬇ Téléchargé : {summary.get('name','?')}", "information", 5)
+            path, events = store.download_one(
+                self.client, self.cfg.base_dir, summary, self.cfg.watch_changes, self.cfg.auto_unlock_free_hints)
         except CTFdError as e:
             self.call_from_thread(self._emit, f"Téléchargement KO : {e}", "error")
             return
-        self.call_from_thread(self._apply_challenges, self.challenges, events)
+        downloaded = (Path(path) / "desc.txt").exists()  # état réel sur disque (auto-réparé)
+        self.call_from_thread(self._after_download, int(summary["id"]), path, downloaded,
+                              summary.get("name", "?"), events)
+
+    def _after_download(self, cid: int, path: str, downloaded: bool, name: str, events: list) -> None:
+        for c in self.challenges:
+            if int(c.get("id", -1)) == cid:
+                c["downloaded"] = downloaded
+                c["path"] = path
+        self._emit(f"⬇ {name} : à jour", "information", 5)
+        self._apply_challenges(self.challenges, events)
 
     @work(thread=True, exclusive=True, group="score")
     def scoreboard_worker(self) -> None:
@@ -325,7 +330,13 @@ class Flagship(App):
             if c.get("_detail"):
                 self._detail_cache[int(c["id"])] = c["_detail"]
         self.challenges = challenges
-        self._rebuild_tree()
+        # ne reconstruire l'arbre que si l'affichage change réellement (sinon le curseur sauterait au poll)
+        sig = tuple((int(c.get("id", 0)), bool(c.get("solved")), bool(c.get("downloaded")),
+                     c.get("solves"), c.get("value"), c.get("name"), c.get("category"))
+                    for c in sorted(challenges, key=lambda x: int(x.get("id", 0))))
+        if sig != self._tree_sig:
+            self._tree_sig = sig
+            self._rebuild_tree()
         solved = sum(1 for c in challenges if c.get("solved"))
         dl = sum(1 for c in challenges if c.get("downloaded"))
         self.sub_title = (f"{solved}/{len(challenges)} résolus · {dl} téléchargés · "
@@ -512,6 +523,10 @@ class Flagship(App):
         self.me_worker()
 
     def action_focus_flag(self) -> None:
+        try:  # le champ flag est dans l'onglet Challenges : s'y placer d'abord
+            self.query_one(TabbedContent).active = "tab-chal"
+        except Exception:  # noqa: BLE001
+            pass
         self.query_one("#flag", Input).focus()
 
     def action_show_notifs(self) -> None:
@@ -522,12 +537,9 @@ class Flagship(App):
         if not self.selected:
             self.notify("Sélectionne d'abord un challenge.", severity="warning")
             return
-        if self.selected.get("downloaded"):
-            self.notify(f"Re-téléchargement (retry) de {self.selected.get('name','?')}…", timeout=2)
-            self.download_worker(dict(self.selected), retry=True)
-        else:
-            self.notify(f"Téléchargement de {self.selected.get('name','?')}…", timeout=2)
-            self.download_worker(dict(self.selected), retry=False)
+        # chemin unique auto-réparateur : (re)crée desc.txt si besoin + complète les fichiers
+        self.notify(f"Téléchargement / mise à jour de {self.selected.get('name','?')}…", timeout=2)
+        self.download_worker(dict(self.selected))
 
     def action_sync_all(self) -> None:
         n = len(self.challenges)
@@ -544,7 +556,11 @@ class Flagship(App):
         if not self.challenges:
             self.notify("Rien à exporter.", severity="warning")
             return
-        p = store.write_progress(self.cfg.base_dir, self.challenges, self.cfg.ctf_name)
+        try:
+            p = store.write_progress(self.cfg.base_dir, self.challenges, self.cfg.ctf_name)
+        except OSError as e:
+            self._emit(f"Export PROGRESS KO : {e}", "error")
+            return
         self._emit(f"📄 PROGRESS.md écrit : {p}", "information", 5)
 
     # -- copier connexion / notes ---------------------------------------
@@ -604,17 +620,20 @@ class Flagship(App):
         if status == "correct":
             if self.cfg.write_flag_on_solve and path:
                 store.write_flag(path, flag)
-            for c in self.challenges:
-                if int(c.get("id", -1)) == cid:
-                    c["solved"] = True
-            self.call_from_thread(self._emit, f"✔ Correct ! {message}".strip(), "information", 6)
-            self.call_from_thread(self._apply_challenges, self.challenges)
+            self.call_from_thread(self._after_solve, cid, message)
             self.scoreboard_worker()
             self.me_worker()
         elif status == "already_solved":
             self.call_from_thread(self._emit, "Déjà résolu.", "information")
         else:
             self.call_from_thread(self._emit, f"✘ {status}: {message}".strip(), "warning", 5)
+
+    def _after_solve(self, cid: int, message: str) -> None:
+        for c in self.challenges:
+            if int(c.get("id", -1)) == cid:
+                c["solved"] = True
+        self._emit(f"✔ Correct ! {message}".strip(), "information", 6)
+        self._apply_challenges(self.challenges)
 
     # -- déblocage d'indice ---------------------------------------------
     def action_unlock_hint(self) -> None:

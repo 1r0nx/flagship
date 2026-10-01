@@ -350,20 +350,25 @@ def ensure_challenge(client: CTFd, base_dir: Path, summary: dict, watch: bool,
 
 
 def download_one(client, base_dir, summary, watch=True, auto_free_hints=False):
-    d, events, _ = ensure_challenge(client, base_dir, summary, watch, auto_free_hints)
+    """Télécharge/complète UN challenge, de façon AUTO-RÉPARATRICE.
+
+    - passe toujours par `ensure_challenge` → recrée `desc.txt` (+ état) s'il manque, puis
+      télécharge les fichiers (branche « nouveau ») ;
+    - si le dossier préexistait, (re)complète les fichiers manquants/échoués dans `work/`
+      (idempotent : les fichiers déjà présents sont sautés).
+    Retourne (chemin, events). Jamais de `work/`/`downloads.txt` sans `desc.txt`.
+    """
+    d, events, detail = ensure_challenge(client, base_dir, summary, watch, auto_free_hints)
+    fresh = any(e.get("kind") == "new" for e in events)  # desc.txt venait d'être (re)créé -> déjà téléchargé
+    if not fresh:
+        if detail is None:
+            detail = client.challenge(summary["id"])
+            if auto_free_hints:
+                detail = _auto_unlock_free(client, detail)
+        file_urls = [(Path(f.split("?")[0]).name, client.file_url(f)) for f in (detail.get("files") or [])]
+        ext_links = extract_links(detail.get("description"))
+        _do_downloads(client, d, detail, file_urls, ext_links)
     return str(d), events
-
-
-def redownload(client, base_dir, summary, auto_free_hints=False) -> list[str]:
-    """Retente les téléchargements d'un challenge déjà présent (fichiers manquants/échoués)."""
-    d = Path(summary["path"]) if summary.get("path") else challenge_dir(
-        base_dir, summary.get("category", ""), summary.get("name", ""))
-    detail = client.challenge(summary["id"])
-    if auto_free_hints:
-        detail = _auto_unlock_free(client, detail)
-    file_urls = [(Path(f.split("?")[0]).name, client.file_url(f)) for f in (detail.get("files") or [])]
-    ext_links = extract_links(detail.get("description"))
-    return _do_downloads(client, d, detail, file_urls, ext_links)
 
 
 def list_state(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints: bool = False):
@@ -478,6 +483,7 @@ def write_progress(base_dir: Path, challenges: list[dict], ctf_name: str = "CTF"
             f"| {c.get('category','?')} | {c.get('name','?')} | {c.get('value','')} | "
             f"{c.get('solves','')} | {'✔' if c.get('solved') else ''} | "
             f"{'✓' if c.get('downloaded') else ''} |")
-    out = base_dir / "PROGRESS.md"
+    # nom DISTINCT : ne jamais écraser un PROGRESS.md maintenu à la main par l'utilisateur
+    out = base_dir / "PROGRESS_flagship.md"
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out

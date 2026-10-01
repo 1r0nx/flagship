@@ -41,9 +41,9 @@ Marqueurs : `✔`/`○` résolu · `✓`/`⬇` téléchargé · `pt · N✓` poi
      téléchargement** (✓/⬇), **points** et **nombre de solves** ; détail avec **first blood**,
      connexion, fichiers, indices ; description consultable **sans** télécharger ; **recherche**
      (`/`), **filtres** (`f` : tous/non résolus/résolus), **tri** (`o` : catégorie/points/solves) ;
-     **soumission** (`flag.txt` écrit si validé), **téléchargement**/retry (`d`), **« Tout
+     **soumission** (`flag.txt` écrit si validé), **téléchargement / mise à jour** (`d`), **« Tout
      synchroniser »** (`D`, parallèle + barre de progression), **déblocage d'indice** (`u`),
-     **copier la connexion** (`c`), **notes** (`e`, `notes.md`), **export PROGRESS.md** (`p`).
+     **copier la connexion** (`c`), **notes** (`e`, `notes.md`), **export `PROGRESS_flagship.md`** (`p`, n'écrase jamais ton PROGRESS.md).
      L'en-tête affiche **ton score et ton rang**.
    - **Scoreboard** : classement (position, équipe/joueur, score) ; **ta ligne est surlignée** et
      le curseur s'y positionne.
@@ -165,7 +165,7 @@ l'outil à chaque fois (moins pratique).
 |--------|--------|
 | `↑`/`↓`, Entrée | naviguer / ouvrir un challenge (affiche l'énoncé, sans télécharger) |
 | clic sur les onglets | basculer Challenges ↔ Scoreboard |
-| `d` | **télécharger** le sélectionné (ou **re-télécharger/retry** s'il est déjà là) |
+| `d` | **télécharger / mettre à jour** le sélectionné (recrée `desc.txt` si manquant, complète les fichiers manquants dans `work/`) |
 | `D` | **Tout synchroniser** (parallèle + barre de progression, confirmation) |
 | `/` | aller à la barre de recherche |
 | `r` | actualiser la liste maintenant (+ scoreboard + rang) |
@@ -176,7 +176,7 @@ l'outil à chaque fois (moins pratique).
 | `u` | débloquer un indice (confirmation) |
 | `c` | copier la connexion (`nc …`/URL) du challenge |
 | `e` | éditer les **notes** du challenge (`notes.md`, éditeur `$EDITOR`) |
-| `p` | exporter un récap **PROGRESS.md** |
+| `p` | exporter un récap dans **`PROGRESS_flagship.md`** (ne touche pas à ton `PROGRESS.md`) |
 | `n` | afficher l'historique des notifications |
 | `Échap` | quitter un champ de saisie (recherche/flag) → focus sur la liste |
 | `Tab` / `Maj+Tab` | passer d'un élément à l'autre (focus suivant/précédent) |
@@ -248,8 +248,9 @@ Quand un challenge est téléchargé, Flagship range ses fichiers dans **`work/`
 
 - **« Tout synchroniser »** (`D`) télécharge **en parallèle** (`DOWNLOAD_WORKERS`) avec une
   **barre de progression**.
-- **`d` sur un challenge déjà téléchargé** = **retry** : retente uniquement les fichiers
-  manquants/en échec (voir `downloads.txt`).
+- **`d` est auto-réparateur** : il **recrée `desc.txt`** s'il manque (dossier vidé p. ex.) et
+  **complète les fichiers manquants/en échec** dans `work/` (idempotent — les fichiers déjà là
+  sont sautés). Pas de `work/`/`downloads.txt` sans `desc.txt`.
 - Ton **token CTFd n'est jamais envoyé à un hôte tiers** (Drive, MEGA…). Le garde-fou Drive est
   vérifié *a posteriori* (gdown ne connaît pas la taille à l'avance).
 
