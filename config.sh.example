@@ -1,0 +1,17 @@
+# Copie ce fichier en `config.sh` et remplis-le.
+# (ne verse jamais config.sh dans un dépôt : il contient ton token)
+
+URL=https://ctf.example.com          # URL du CTFd
+CTFD_TOKEN=ctfd_xxxxxxxxxxxxxxxxxxx  # ton token (Settings > Access Tokens)
+
+# --- optionnel ---
+CTF_NAME=MonCTF            # nom affiché + dossier par défaut
+BASE_DIR=./MonCTF          # racine où générer les dossiers (relatif au config.sh)
+POLL_INTERVAL=60           # synchro auto toutes les N secondes (0 = désactivée)
+WRITE_FLAG_ON_SOLVE=true   # écrire flag.txt quand un flag est validé dans la TUI
+WATCH_CHANGES=true         # détecter les changements de description/indices (desc2.txt, desc3.txt...)
+                           #   met à false pour une synchro plus légère (moins de requêtes)
+AUTO_UNLOCK_FREE_HINTS=false # débloquer automatiquement les indices à coût 0 (gratuits)
+DOWNLOAD_WORKERS=6         # nb de téléchargements en parallèle pour « Tout synchroniser »
+THEME=textual-dark         # thème de départ (textual-dark, textual-light, nord, gruvbox,
+                           #   dracula, tokyo-night, monokai, catppuccin-mocha… ; touche `t` pour cycler)

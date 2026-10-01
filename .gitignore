@@ -1,0 +1,16 @@
+# secrets — ne jamais versionner le token
+config.sh
+
+# arborescences de CTF générées
+*/
+!flagship/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# packaging
+*.egg-info/
+build/
+dist/
