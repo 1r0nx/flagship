@@ -1,5 +1,9 @@
 # 🚩 Flagship (Documentation FR)
 
+*Un nouveau CTF, et c'est reparti : créer les dossiers, télécharger les fichiers, suivre ce qui est
+résolu, retrouver ses notes… Flagship automatise toute cette plomberie ; il ne reste plus qu'à
+résoudre les challenges.*
+
 Flagship est une interface en terminal (TUI) pour les CTF basés sur **CTFd**. L'outil synchronise
 les challenges dans une arborescence de dossiers organisée et permet de les parcourir, de lire les
 énoncés et de soumettre les flags sans quitter le terminal.

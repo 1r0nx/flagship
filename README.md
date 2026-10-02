@@ -1,5 +1,11 @@
 # 🚩 Flagship
 
+*Un nouveau CTF, et c'est reparti : créer les dossiers, télécharger les fichiers, suivre ce qui est
+résolu, retrouver ses notes… Flagship automatise toute cette plomberie ; il ne reste plus qu'à
+résoudre les challenges.*
+*A new CTF, and it all starts over: creating folders, downloading files, tracking solves, keeping
+notes… Flagship automates all this plumbing, leaving just one thing to do: solve the challenges.*
+
 Une **TUI** pour n'importe quel CTF sous **CTFd** : synchronise les challenges en dossiers,
 et permet de **parcourir, lire et soumettre les flags** depuis le terminal.
 *A **TUI** for any **CTFd** CTF: it syncs challenges into folders and lets users **browse, read and
