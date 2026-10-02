@@ -113,6 +113,7 @@ flagship ~/ctfs/HeroCTF/config.sh
 | `/` | focus the inline search field, filters live as you type |
 | `r` | refresh now (list, scoreboard, rank) |
 | `f` | cycle filter: all, unsolved, solved |
+| `x` | fold all categories, or unfold them all back |
 | `o` | cycle sort: category, points, solves, fewest solves, name, id, downloaded first, unsolved first |
 | `t` | cycle colour theme (remembered) |
 | `s` | focus the flag field |

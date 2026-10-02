@@ -115,6 +115,7 @@ flagship ~/ctfs/HeroCTF/config.sh
 | `/` | focus sur le champ de recherche en ligne, filtre en direct |
 | `r` | rafraîchir maintenant (liste, scoreboard, rang) |
 | `f` | changer de filtre : all, unsolved, solved |
+| `x` | replier toutes les catégories, ou tout déplier |
 | `o` | changer de tri : catégorie, points, solves, moins de solves, nom, id, téléchargés d'abord, non résolus d'abord |
 | `t` | changer de thème (mémorisé) |
 | `s` | focus sur le champ de flag |

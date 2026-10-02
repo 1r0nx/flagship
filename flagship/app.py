@@ -349,6 +349,7 @@ class Flagship(App):
         ("C", "download_category", "Cat. dl"),
         ("f", "cycle_filter", "Filter"),
         ("o", "cycle_sort", "Sort"),
+        ("x", "collapse_expand_all", "Fold/unfold"),
         ("t", "cycle_theme", "Theme"),
         ("slash", "focus_search", "Search"),
         ("s", "focus_flag", "Submit"),
@@ -1015,6 +1016,22 @@ class Flagship(App):
         self.sort_mode = SORTS[(SORTS.index(self.sort_mode) + 1) % len(SORTS)]
         self.notify(f"↕ Sort: {SORT_LABEL[self.sort_mode]}", timeout=3)
         self._apply_view()
+
+    def action_collapse_expand_all(self) -> None:
+        """One key, both directions: every category expanded -> collapse them all ; otherwise
+        expand them all back. `node.expand()`/`collapse()` post the same Tree messages a manual
+        click would, so `collapsed_cats` and the saved state stay in sync for free."""
+        cats = list(self.query_one("#tree", Tree).root.children)
+        if not cats:
+            return
+        if all(not node.is_collapsed for node in cats):
+            for node in cats:
+                node.collapse()
+            self.notify("📁 Collapsed all categories", timeout=2)
+        else:
+            for node in cats:
+                node.expand()
+            self.notify("📂 Expanded all categories", timeout=2)
 
     def action_cycle_theme(self) -> None:
         names = list(self.available_themes)
