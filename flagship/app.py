@@ -337,7 +337,10 @@ class Flagship(App):
     #legend_row { height: 1; background: $panel; }
     #legend_labels { width: auto; padding: 0 0 0 1; color: $text-muted; }
     #search { border: none; height: 1; width: 1fr; padding: 0 1; background: $panel; }
-    #tree { height: 1fr; }
+    /* the challenge list's own horizontal scrollbar, specifically, is hidden: against the
+       narrow treecol its track is short, so the thumb reads as a big block even at the
+       minimum 1-row thickness ; scrolling right on a long name still works via wheel/keys */
+    #tree { height: 1fr; scrollbar-size-horizontal: 0; }
     #rightcol { width: 1fr; }
     #detailwrap { height: 1fr; }
     #detail { padding: 0 1; }
