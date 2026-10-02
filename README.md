@@ -1,10 +1,9 @@
 # 🚩 Flagship
 
-*Un nouveau CTF, et c'est reparti : créer les dossiers, télécharger les fichiers, suivre ce qui est
-résolu, retrouver ses notes… Flagship automatise toute cette plomberie ; il ne reste plus qu'à
-résoudre les challenges.*
-*A new CTF, and it all starts over: creating folders, downloading files, tracking solves, keeping
-notes… Flagship automates all this plumbing, leaving just one thing to do: solve the challenges.*
+*Nouveau CTF, même routine : dossiers, téléchargements, suivi des résolus, notes à garder.
+Flagship s'en charge, toi tu résous les challenges.*
+*New CTF, same routine: folders, downloads, tracking what's solved, keeping notes. Flagship
+handles all that, you just solve challenges.*
 
 Une **TUI** pour n'importe quel CTF sous **CTFd** : synchronise les challenges en dossiers,
 et permet de **parcourir, lire et soumettre les flags** depuis le terminal.
@@ -28,9 +27,9 @@ flagship config.sh                   # (ou ./flagship.sh config.sh)
 Par défaut, le lancement **liste** seulement les challenges (aucun téléchargement). / By default,
 launch just **lists** challenges (no download).
 
-Raccourcis / Shortcuts : `↑↓`·Enter · `d` télécharger/download · `D` tout sync/sync all ·
-`/` search · `r` refresh · `f` filter · `o` sort · `s` flag · `u` hint ·
-`c` copy · `w` folder · `e` notes · `p` progress · `q` quit · drag `┃` to resize panes.
+Raccourcis / Shortcuts : `↑↓`·Enter · `d` download · `D` sync all · `/` search (inline, no extra
+height) · `r` refresh · `f` filter · `o` sort · `s` flag · `u` hint · `c` copy · `w` folder ·
+`e` notes · `p` progress · `q` quit · drag `┃` to resize panes.
 Interface language: English. / Interface en anglais.
 Onglets / Tabs : Challenges · Scoreboard · Stats · Notifications.
 

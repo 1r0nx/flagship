@@ -37,19 +37,34 @@ from .config import Config
 from .ctfd import CTFd, CTFdError
 from . import store
 
-BEAM_CHAR = "▏"  # thin vertical bar (U+258F) to mimic an I-beam cursor
+BEAM_CHAR = "│"  # thin vertical bar (U+2502), centered in its cell so both neighbouring
+                 # characters sit flush against it ; "▏" (U+258F) hugs the left edge only,
+                 # leaving a visible gap before the character on the right
 
 
 class BeamInput(Input):
     """Input field whose cursor is a vertical bar ("I-beam") instead of the default
     reversed block.
 
-    Textual's native block is neutralised (its style is rendered empty during our own render),
-    then a single bar is drawn at the cursor position. This avoids any "double cursor" (bar +
-    leftover block) on the first character of a wide placeholder (emoji). On any
-    incompatibility, it silently falls back to the standard cursor."""
+    The bar is INSERTED in its own cell between the character before and the character after
+    the cursor, never drawn on top of (replacing) either one: with a block cursor, the
+    character right after the cursor is hidden every time the cursor blinks on, which is the
+    one thing an insertion-point cursor must never do. That cell is reserved at all times
+    (focused, regardless of blink phase) and just toggles between the bar glyph and a blank, so
+    the rest of the line does not visibly shift back and forth as it blinks. Delete/Backspace
+    behave exactly as before: this only changes how the cursor is drawn, not Input's own
+    editing logic. On any incompatibility, it silently falls back to the standard cursor.
+
+    `center=True` (the flag field): placeholder and typed text are centered in the box instead
+    of hugging the left edge, cursor included. Falls back to the normal left-aligned rendering
+    whenever the content is too long to fit (a flag that overflows the box still needs Textual's
+    own scrolling, which the centered path doesn't attempt to replicate)."""
 
     _suppress_native_cursor = False
+
+    def __init__(self, *args, center: bool = False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._center = center
 
     def get_component_rich_style(self, *names, **kwargs):
         # only neutralise the native cursor style during our own render
@@ -58,33 +73,78 @@ class BeamInput(Input):
         return super().get_component_rich_style(*names, **kwargs)
 
     def render_line(self, y: int) -> Strip:
-        # first line, field focused, cursor visible (honours blinking)
-        if y != 0 or not self.has_focus or not self._cursor_visible:
+        if y != 0:
             return super().render_line(y)
+        if self._center:
+            try:
+                centered = self._render_centered()
+                if centered is not None:
+                    return centered
+            except Exception:
+                pass  # fall through to the normal (left-aligned) rendering below
+        if not self.has_focus:
+            return super().render_line(0)
         try:
-            # 1) normal render but WITHOUT the native cursor block
-            self._suppress_native_cursor = True
-            strip = super().render_line(y)
-            self._suppress_native_cursor = False
-
-            # bar colour = fill colour of the native block (follows the theme)
-            cur = super().get_component_rich_style("input--cursor")
-            bar_style = self.rich_style + Style(color=cur.bgcolor, bold=True)
-            bar = Strip([Segment(BEAM_CHAR, bar_style)])
-            width = strip.cell_length
-
-            # 2) visual column of the cursor (handles wide characters)
-            col = cell_len(self.value[: self.cursor_position]) - self.scroll_offset.x
-            if col < 0 or col > width:
-                return super().render_line(y)
-
-            # 3) replace the single cursor cell with the bar
-            left = strip.crop(0, col)
-            right = strip.crop(col + 1, width)
-            return Strip.join([left, bar, right])
+            return self._render_insertion_cursor()
         except Exception:
-            self._suppress_native_cursor = False
-            return super().render_line(y)  # fallback: default cursor
+            return super().render_line(0)  # fallback: default cursor
+
+    def _cursor_slot_style(self) -> Style:
+        # bar colour = fill colour of the native block (follows the theme)
+        cur = super().get_component_rich_style("input--cursor")
+        return self.rich_style + Style(color=cur.bgcolor, bold=True)
+
+    def _insert_slot(self, strip: Strip, col: int, width: int) -> Strip:
+        """Insert a one-cell slot (the cursor bar, or a blank when blinked off) right at `col`,
+        shifting everything from `col` onward by one cell instead of overwriting it, then crop
+        back to `width` so the box keeps its size (the cell pushed past the right edge is simply
+        the one that becomes hidden, same as any text editor scrolling/clipping its tail)."""
+        glyph = BEAM_CHAR if self._cursor_visible else " "
+        style = self._cursor_slot_style() if self._cursor_visible else self.rich_style
+        slot = Strip([Segment(glyph, style)])
+        left = strip.crop(0, col)
+        right = strip.crop(col, width)  # nothing dropped: the char that was at `col` moves to col+1
+        return Strip.join([left, slot, right]).crop(0, width)
+
+    def _render_insertion_cursor(self) -> Strip:
+        # 1) normal render but WITHOUT the native cursor block
+        self._suppress_native_cursor = True
+        strip = super().render_line(0)
+        self._suppress_native_cursor = False
+        width = strip.cell_length
+
+        # 2) visual column of the cursor (handles wide characters)
+        col = cell_len(self.value[: self.cursor_position]) - self.scroll_offset.x
+        if col < 0 or col > width:
+            return strip
+        return self._insert_slot(strip, col, width)
+
+    def _render_centered(self) -> Strip | None:
+        """Placeholder or value, centered in the box ; the I-beam cursor (if focused) sits
+        wherever that centered text puts it. Returns None to signal "doesn't fit, use the
+        normal rendering instead" rather than attempting to crop/scroll it."""
+        width = self.scrollable_content_region.width
+        showing_placeholder = not self.value
+        text = self.placeholder if showing_placeholder else self.value
+        content_len = cell_len(text)
+        if content_len > width:
+            return None
+        pad_left = (width - content_len) // 2
+
+        text_style = (self.get_component_rich_style("input--placeholder") if showing_placeholder
+                     else self.rich_style)
+        strip = Strip([Segment(" " * pad_left), Segment(text, text_style)])
+        # one extra column of slack: if the text exactly fills `width` and the cursor sits right
+        # at the end, _insert_slot needs somewhere to put it without just cropping it away
+        strip = strip.extend_cell_length(width + 1, self.rich_style)
+
+        if self.has_focus:
+            col = pad_left if showing_placeholder else pad_left + cell_len(self.value[: self.cursor_position])
+            if 0 <= col <= width:
+                strip = self._insert_slot(strip, col, width + 1)
+        # final width is `width + 1`, matching what Textual's own Input always renders at
+        # (`scrollable_content_region.width` is 1 less than the strip it actually expects)
+        return strip.apply_style(self.rich_style)
 
 class Splitter(Widget):
     """Vertical separator draggable with the mouse between the challenge list and the detail.
@@ -185,7 +245,7 @@ def build_member_md(name: str, challenges: list[dict], solved_ids: set[int],
     solves list attributes a solve to the TEAM, not the member, so a first blood is counted for
     this member when `fb_cache[cid] == team_name` (the team's own first blood) AND the
     challenge is in this member's personal `solved_ids` (which DOES come from a per-member
-    source: `/teams/me/solves`'s `user` field) — i.e. they personally made that winning
+    source: `/teams/me/solves`'s `user` field), meaning they personally made that winning
     submission. `team_name` defaults to `name` for the solo-player case."""
     fb_cache = fb_cache or {}
     fb_name = team_name if team_name is not None else name
@@ -347,8 +407,7 @@ class Flagship(App):
                     with Vertical(id="rightcol"):
                         with VerticalScroll(id="detailwrap"):
                             yield Markdown("*Select a challenge on the left.*", id="detail")
-                        # leading space: the I-beam cursor blinks on it without hiding the emoji
-                        yield BeamInput(placeholder=" 🚩", id="flag")
+                        yield BeamInput(placeholder="Submit 🚩", id="flag", center=True)
             with TabPane("Scoreboard", id="tab-score"):
                 yield DataTable(id="scoreboard")
             with TabPane("Stats", id="tab-stats"):
@@ -459,7 +518,7 @@ class Flagship(App):
             hint = ""
             if "403" in str(e) or "access denied" in str(e):
                 if self.client.auth_ok():
-                    hint = " (token OK: challenges hidden — CTF over or not started yet)"
+                    hint = " (token OK: challenges hidden, CTF over or not started yet)"
                 else:
                     hint = " (token rejected: regenerate it in Settings > Access Tokens)"
             cached = store.load_cache(self.cfg.base_dir)  # offline mode
@@ -490,8 +549,9 @@ class Flagship(App):
                                       cached.get("personal"), cached.get("members"))
 
     def _update_title(self) -> None:
-        """Just the app name, centered by Header — score/rank/solved/downloaded/filter/sort are
-        all shown elsewhere already (Stats tab, legend row), so this line stays uncluttered."""
+        """Just the app name, centered by Header. Score, rank, solved/downloaded counts and the
+        active filter/sort are all shown elsewhere already (Stats tab, legend row), so this line
+        stays uncluttered."""
         self.title = "Flagship"
 
     def _render_stats(self) -> None:
@@ -968,7 +1028,7 @@ class Flagship(App):
 
     def _update_legend(self) -> None:
         """Always-visible reminder of the active filter and sort, on the same row as the
-        (always-on, borderless) search field — so searching never costs extra terminal height."""
+        (always-on, borderless) search field, so searching never costs extra terminal height."""
         self.query_one("#legend_icons", Static).update(
             "[cyan]▣[/cyan] [grey42]▢[/grey42] files    "
             "[green]●[/green] [grey42]○[/grey42] solved")
@@ -1213,14 +1273,14 @@ class Flagship(App):
             self.call_from_thread(self._emit, f"Unlock failed: {e}", "error")
             return
         # the unlock itself succeeded (POST /unlocks: cost already deducted server-side) ; the
-        # detail refetch below is best-effort display only — a failure here must NEVER be
+        # detail refetch below is best-effort display only. A failure here must NEVER be
         # reported as "unlock failed", since the hint genuinely is unlocked at this point
         try:
             detail = self.client.challenge(cid)
         except CTFdError as e:
             self.call_from_thread(
                 self._emit,
-                f"💡 Hint #{hint_id} unlocked, but couldn't refresh its content ({e}) — press `r`.",
+                f"💡 Hint #{hint_id} unlocked, but couldn't refresh its content ({e}). Press `r`.",
                 "warning", 8)
             return
         self._detail_cache[cid] = detail

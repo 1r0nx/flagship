@@ -503,13 +503,13 @@ def fetch_first_bloods(client: CTFd, challenge_ids: list[int], known: dict[int, 
 
     Returns (new_entries, api_errors). Merge `new_entries` into your own cache ; `known` itself
     is not mutated. A challenge's first blood never changes once set, so callers can cache the
-    result forever (no need to re-fetch on a later sync) — which is why a still-unknown first
+    result forever (no need to re-fetch on a later sync). This is why a still-unknown first
     blood (no recorded solve yet, e.g. a locally-flagged solve the server hasn't caught up with)
     is NEVER included here: it must stay retriable on the next call, not frozen as "no one"
     forever.
 
     `api_errors` counts calls that raised `CTFdError` (as opposed to a clean "no solves yet"),
-    e.g. because the CTF has ended — this endpoint is `@during_ctf_time_only` on CTFd, so EVERY
+    e.g. because the CTF has ended. This endpoint is `@during_ctf_time_only` on CTFd, so EVERY
     call fails the same way once it's over. Callers should treat "every attempted id errored" as
     a signal to stop auto-retrying this batch on every poll, not just a handful of "not yet"s.
     """
