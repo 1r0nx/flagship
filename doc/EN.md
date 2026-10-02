@@ -6,18 +6,7 @@ handles all that, you just solve challenges.
 A terminal app for CTFd. Lists challenges, downloads files, tracks what you solved, lets you
 submit flags. No browser needed.
 
-```
-┌──────────────────────────────Flagship──────────────────────────────┐
-│▣ ▢ files  ● ○ solved              │ # 2 - Return                   │
-│filter: all  sort: points  search: │ ──────────INFO──────────       │
-│Pwn (3/8)                          │ Category: Pwn · Points: 200 · ○│
-│ ▣ ●  0 - Overflow 100·12 solves   │ Connection: nc chal... 1389    │
-│ ▣ ○  2 - Return   200·5 solves    │ ───────DESCRIPTION───────      │
-│Crypto (5/9)                       │ Can you pwn this problem? ...  │
-│ ▢ ●  First XOR    50·30 solves    ├────────────────────────────────┤
-│ ▢ ○  RSA          150·5 solves    │ 🚩                              │
-└ d Dl  D Sync  w Folder  u Hint  / Search  f Filter  o Sort  q Quit ─┘
-```
+![Flagship screenshot](img/screenshot.png)
 
 > The interface is in **English** (labels, toasts, errors), same for generated files
 > (`desc.txt`, `downloads.txt`, `notes.md`, `PROGRESS_flagship.md`).

@@ -6,18 +6,7 @@ Flagship s'en charge, toi tu résous les challenges.
 Une appli terminal pour CTFd. Liste les challenges, télécharge les fichiers, suit ce qui est
 résolu, permet de soumettre des flags. Pas besoin de navigateur.
 
-```
-┌───────────────────────────────Flagship───────────────────────────────┐
-│▣ ▢ files  ● ○ solved              │ # 2 - Return                     │
-│filter: all  sort: points  search: │ ──────────INFO──────────         │
-│Pwn (3/8)                          │ Category: Pwn · Points: 200 · ○  │
-│ ▣ ●  0 - Overflow 100·12 solves   │ Connection: nc chal... 1389      │
-│ ▣ ○  2 - Return   200·5 solves    │ ───────DESCRIPTION───────        │
-│Crypto (5/9)                       │ Can you pwn this problem? ...    │
-│ ▢ ●  First XOR    50·30 solves    ├──────────────────────────────────┤
-│ ▢ ○  RSA          150·5 solves    │ 🚩                                │
-└ d Download  D Sync all  w Folder  u Hint  / Search  f Filter  o Sort ─┘
-```
+![Capture d'écran de Flagship](img/screenshot.png)
 
 > L'interface est **en anglais** (libellés, notifications, erreurs), comme les fichiers
 > générés (`desc.txt`, `downloads.txt`, `notes.md`, `PROGRESS_flagship.md`).
