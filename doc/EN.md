@@ -29,6 +29,12 @@ submit flags. No browser needed.
 - Stats tab: score, rank, solved, points, downloaded, first bloods. Team mode adds a
   per-member breakdown, click a name for their stats, and the detail panel shows who on the
   team actually solved each one.
+- Click "N solves" on a challenge to see who solved it: players in solo mode, teams in team
+  mode (your own team starred, with the teammate who solved it). CTFd never exposes which
+  member of another team solved, only its name: that's a platform limit, not Flagship's.
+- Dynamic-value challenges show their point range (initial → minimum). Limited-attempt ones
+  show how many you have left. Flags you already tried and got rejected stay listed, so you
+  never retype one by mistake.
 - Works solo or in a team, same keys either way.
 - CTF over or offline? Shows your last synced data, nothing lost.
 

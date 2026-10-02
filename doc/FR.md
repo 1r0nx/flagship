@@ -30,6 +30,12 @@ résolu, permet de soumettre des flags. Pas besoin de navigateur.
 - Onglet Stats : score, rang, résolus, points, téléchargés, first bloods. En mode équipe,
   détail par membre, clic sur un nom pour voir ses stats, et le panneau de détail indique qui
   dans l'équipe a résolu chaque challenge.
+- Clic sur "N solves" pour voir qui a résolu : joueurs en solo, équipes en mode équipe (ta
+  propre équipe marquée, avec le membre qui a résolu). CTFd ne révèle jamais quel membre d'une
+  autre équipe a résolu, seulement son nom : c'est une limite de la plateforme, pas de Flagship.
+- Les challenges à points dynamiques affichent leur plage (initial → minimum). Ceux à essais
+  limités affichent combien il t'en reste. Les flags déjà tentés et refusés restent listés,
+  pour ne jamais en retaper un par erreur.
 - Marche pareil en solo ou en équipe.
 - CTF fini ou hors-ligne ? Flagship réaffiche la dernière synchro, rien n'est perdu.
 

@@ -181,6 +181,16 @@ class CTFd:
             return None
         return d[0].get("name") if d else None
 
+    def challenge_solvers(self, cid: int) -> list[dict]:
+        """Everyone who solved a challenge, earliest first (team name in team mode, player name
+        in solo). Returns [] once the CTF has ended: CTFd locks this endpoint to during-event
+        only."""
+        try:
+            d = self._get(f"/api/v1/challenges/{cid}/solves").get("data", []) or []
+        except CTFdError:
+            return []
+        return [{"name": s.get("name", "?"), "date": s.get("date")} for s in d]
+
     def scoreboard(self, top: int = 50) -> list[dict]:
         """Ranking: list of {pos, name, score} (truncated to `top`)."""
         try:

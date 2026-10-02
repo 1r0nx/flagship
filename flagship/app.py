@@ -316,6 +316,52 @@ class MemberStatsScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
+class SolversScreen(ModalScreen[None]):
+    """Who solved a challenge (opened by clicking "N solves" in the detail panel). Team mode:
+    rows are team names ; your own team's row is starred and names the teammate who solved it,
+    via the same per-member breakdown the Stats tab uses."""
+    BINDINGS = [("escape", "dismiss", "Close")]
+    CSS = """
+    SolversScreen { align: center middle; }
+    #sbox { width: 70%; height: 80%; border: thick $accent; background: $surface; padding: 1 2; }
+    #shead { color: $text-muted; }
+    """
+
+    def __init__(self, chal_name: str, solvers: list[dict], team_mode: bool,
+                my_team: str | None, my_member: str | None):
+        super().__init__()
+        self._chal_name = chal_name
+        self._solvers = solvers
+        self._team_mode = team_mode
+        self._my_team = my_team
+        self._my_member = my_member
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="sbox"):
+            yield Static("Esc to close", id="shead")
+            with VerticalScroll():
+                yield Markdown(self._build_md(), open_links=False)
+
+    def _build_md(self) -> str:
+        who = "team" if self._team_mode else "player"
+        md = [f"# {self._chal_name}", "", f"**{len(self._solvers)} {who}(s) solved this**", ""]
+        if not self._solvers:
+            md.append("*No solves yet, or the CTF has ended (solver list locked by CTFd).*")
+            return "\n".join(md)
+        header = "Team" if self._team_mode else "Player"
+        md += [f"| # | {header} | When |", "|---|---|---|"]
+        for i, s in enumerate(self._solvers, 1):
+            name = s.get("name", "?")
+            when = (s.get("date") or "")[:19].replace("T", " ")
+            mine = self._team_mode and self._my_team and name == self._my_team
+            label = f"⭐ **{name}**" + (f" ({self._my_member})" if mine and self._my_member else "")
+            md.append(f"| {i} | {label if mine else name} | {when} |")
+        return "\n".join(md)
+
+    def action_dismiss(self) -> None:
+        self.dismiss(None)
+
+
 class Flagship(App):
     CSS = """
     Header HeaderIcon { display: none; }  /* drop the "⭘" command-palette icon, top-left */
@@ -661,21 +707,36 @@ class Flagship(App):
         w.update("\n".join(md))
 
     def on_markdown_link_clicked(self, event) -> None:
-        """Click on a name (href 'member:<id>') in the Stats tab → opens their detail box.
+        """Click on a name (href 'member:<id>') in the Stats tab → opens their detail box, or on
+        "N solves" (href 'solves:<id>') in the challenge detail panel → opens the solver list.
         Other links (external links in the detail, http) are ignored here."""
         href = getattr(event, "href", "") or ""
-        if not href.startswith("member:"):
-            return
-        try:
-            uid = int(href.split(":", 1)[1])
-        except ValueError:
-            return
-        m = next((x for x in self._members if x.get("user_id") == uid), None)
-        if not m:
-            return
-        self.push_screen(MemberStatsScreen(
-            m.get("name", "?"), self.challenges, set(m.get("solved_ids", [])),
-            self._fb_cache, self.me.get("name")))
+        if href.startswith("member:"):
+            try:
+                uid = int(href.split(":", 1)[1])
+            except ValueError:
+                return
+            m = next((x for x in self._members if x.get("user_id") == uid), None)
+            if not m:
+                return
+            self.push_screen(MemberStatsScreen(
+                m.get("name", "?"), self.challenges, set(m.get("solved_ids", [])),
+                self._fb_cache, self.me.get("name")))
+        elif href.startswith("solves:"):
+            try:
+                cid = int(href.split(":", 1)[1])
+            except ValueError:
+                return
+            c = next((x for x in self.challenges if int(x.get("id", -1)) == cid), None)
+            self.solvers_worker(cid, c.get("name", "?") if c else "?")
+
+    @work(thread=True, exclusive=True, group="solvers")
+    def solvers_worker(self, cid: int, name: str) -> None:
+        solvers = self.client.challenge_solvers(cid)
+        team_mode = bool(self.me.get("team"))
+        self.call_from_thread(self.push_screen, SolversScreen(
+            name, solvers, team_mode, self.me.get("name") if team_mode else None,
+            self._solver_name(cid) if team_mode else None))
 
     def _apply_me(self, me: dict, personal: dict | None = None,
                   members: list | None = None) -> None:
@@ -980,9 +1041,22 @@ class Flagship(App):
         files = [Path(f.split("?")[0]).name for f in (c.get("files") or [])]
         status = "● solved" if c.get("solved") else "○ unsolved"
         cid = int(c.get("id", -1))
+        tried = store.load_attempts(self.cfg.base_dir).get(str(cid), [])  # our own rejected flags
         meta = f"**Category**: {c.get('category','?')}  ·  **Points**: {c.get('value','?')}  ·  **{status}**"
+        if c.get("decay") is not None:  # dynamic-value challenge: points drop as more solve it
+            meta += f"  (dynamic: {c.get('initial','?')} → {c.get('minimum','?')})"
         if c.get("solves") is not None:
-            meta += f"  ·  **Solves**: {c['solves']}"
+            # clickable (href 'solves:<id>') intercepted by on_markdown_link_clicked, same pattern
+            # as the member links in the Stats tab
+            meta += f"  ·  [{c['solves']} solves](solves:{cid})"
+        if c.get("max_attempts"):  # 0/None = unlimited, nothing to show then
+            # CTFd's own "attempts" count (server-side, authoritative) when the detail has
+            # loaded ; before that, or if the server omits it, our own rejection log is a stand-in
+            used = c.get("attempts")
+            if used is None:
+                used = len(tried)
+            left = max(0, int(c["max_attempts"]) - int(used))
+            meta += f"  ·  **Attempts**: {used}/{c['max_attempts']} ({left} left)"
         fb = self._fb_cache.get(cid)
         md = [f"# {c.get('name','?')}", self._rule("INFO"), meta]
         if c.get("solved") and self.me.get("team"):
@@ -1011,6 +1085,8 @@ class Flagship(App):
         ext = store.extract_links(c.get("description"))
         if ext:
             md.append("**External links**: " + ", ".join(f"[{store.classify_link(u)}] {u}" for u in ext))
+        if tried:
+            md.append("**Tried & rejected**: " + ", ".join(f"`{f}`" for f in tried))
         md.append(self._rule("DESCRIPTION"))
         md.append("*Loading…*" if loading else (store.clean_desc(c.get("description")) or "*(no description)*"))
         hints = c.get("hints") or []

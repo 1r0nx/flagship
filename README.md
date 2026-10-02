@@ -28,7 +28,8 @@ Par défaut, le lancement **liste** seulement les challenges (aucun télécharge
 launch just **lists** challenges (no download).
 
 Raccourcis / Shortcuts : `↑↓`·Enter · `d` download · `D` sync all · `/` search (inline, no extra
-height) · `r` refresh · `f` filter · `o` sort · `s` flag · `u` hint · `c` copy · `w` folder ·
+height) · `r` refresh · `f` filter · `b` bookmark · `x` fold/unfold · `o` sort · `s` flag ·
+`u` hint · `c` copy · `w` folder ·
 `e` notes · `p` progress · `q` quit · drag `┃` to resize panes.
 Interface language: English. / Interface en anglais.
 Onglets / Tabs : Challenges · Scoreboard · Stats · Notifications.
