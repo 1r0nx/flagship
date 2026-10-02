@@ -30,6 +30,12 @@ launch just **lists** challenges (no download).
 
 Raccourcis / Shortcuts : `↑↓`·Enter · `d` télécharger/download · `D` tout sync/sync all ·
 `/` search · `r` refresh · `f` filtre · `o` tri/sort · `s` flag · `u` indice/hint ·
-`c` copier/copy · `e` notes · `p` progress · `n` notifs · `q` quit.
+`c` copier/copy · `w` dossier/folder · `e` notes · `p` progress · `q` quit.
+Onglets / Tabs : Challenges · Scoreboard · Stats · Notifications.
 
 > Le fichier `config.sh` contient le token : il est git-ignoré. / holds the token: git-ignored.
+
+---
+
+*Flagship a été conçu et développé avec [Claude Code](https://claude.com/claude-code).*
+*Flagship was designed and built with [Claude Code](https://claude.com/claude-code).*

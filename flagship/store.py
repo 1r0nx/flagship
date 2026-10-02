@@ -449,27 +449,67 @@ def sync(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints: bool
     return challenges, all_events
 
 
-# ------------------------------------------------------------------ divers
-def _cache_path(base_dir: Path) -> Path:
-    return base_dir / ".flagship" / "challenges_cache.json"
+def download_subset(client: CTFd, base_dir: Path, summaries: list[dict], watch: bool = True,
+                    auto_free_hints: bool = False, workers: int = 6, progress=None):
+    """Télécharge un SOUS-ENSEMBLE de challenges (ex. une catégorie), en parallèle.
+
+    `summaries` sont des entrées déjà listées (avec leur `path`). Les dicts sont mutés sur place
+    (`downloaded`, `_detail`) pour refléter l'état. Retourne (summaries, events).
+    """
+    base_dir.mkdir(parents=True, exist_ok=True)
+    all_events, lock = [], threading.Lock()
+    total, done = len(summaries), 0
+
+    def task(ch):
+        try:
+            _, evs, detail = ensure_challenge(client, base_dir, ch, watch, auto_free_hints)
+            d = Path(ch["path"]) if ch.get("path") else challenge_dir(
+                base_dir, ch.get("category", ""), ch.get("name", ""))
+            ch["downloaded"] = (d / "desc.txt").exists()
+            if detail:
+                ch["_detail"] = detail
+            return evs
+        except CTFdError:
+            return []
+
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+        futs = {ex.submit(task, ch): ch for ch in summaries}
+        for fut in as_completed(futs):
+            with lock:
+                all_events.extend(fut.result() or [])
+            done += 1
+            if progress:
+                progress(done, total)
+    return summaries, all_events
 
 
-def save_cache(base_dir: Path, challenges: list[dict]) -> None:
-    """Mémorise la dernière liste synchronisée (pour le mode hors-ligne)."""
+# ------------------------------------------------------------------ cache (mode hors-ligne)
+def save_json(base_dir: Path, name: str, data) -> None:
+    """Écrit un cache JSON dans <base>/.flagship/<name> (silencieux en cas d'échec)."""
     try:
-        p = _cache_path(base_dir)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(challenges, ensure_ascii=False), encoding="utf-8")
+        d = base_dir / ".flagship"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / name).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     except (OSError, TypeError):
         pass
 
 
-def load_cache(base_dir: Path) -> list[dict]:
-    """Relit la dernière liste synchronisée (liste vide si aucune)."""
+def load_json(base_dir: Path, name: str, default=None):
+    """Relit un cache JSON ; renvoie `default` si absent/illisible."""
     try:
-        return json.loads(_cache_path(base_dir).read_text(encoding="utf-8"))
+        return json.loads((base_dir / ".flagship" / name).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return []
+        return default
+
+
+def save_cache(base_dir: Path, challenges: list[dict]) -> None:
+    """Mémorise la dernière liste de challenges synchronisée (mode hors-ligne)."""
+    save_json(base_dir, "challenges_cache.json", challenges)
+
+
+def load_cache(base_dir: Path) -> list[dict]:
+    """Relit la dernière liste de challenges synchronisée (liste vide si aucune)."""
+    return load_json(base_dir, "challenges_cache.json", []) or []
 
 
 def _has_flag(path):

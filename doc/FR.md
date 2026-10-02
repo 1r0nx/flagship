@@ -9,15 +9,15 @@ les challenges dans une arborescence de dossiers organisée et permet de les par
 énoncés et de soumettre les flags sans quitter le terminal.
 
 ```
-┌ Flagship · MonCTF · score 8270 (#3) ·· 12/40 résolus · 8 téléch. · tri : catégorie ┐
-│ ▣ ▢ fichiers  ● ○ résolu │  # 2 - Return                              │
-│ Pwn (3/8)                │  Catégorie : Pwn · Points : 200 · ○        │
-│  ▣ ●  0 - Overflow 100·12 solves │  🩸 First blood : team_x            │
-│  ▣ ○  2 - Return   200·5 solves  │  Connexion : nc chal... 1389       │
-│ Crypto (5/9)             │  --- Can you pwn this problem? ...          │
-│  ▢ ●  First XOR    50·30 solves ├─────────────────────────────────────┤
-│  ▢ ○  RSA          150·5 solves │ 🚩                                   │
-└ d Télécharger  D Tout sync  / Rechercher  f Filtre  o Tri  q Quitter ──┘
+┌ Flagship · MonCTF · score 8270 (#3) · ⏳ fin 2h11 · 12/40 résolus ────────┐
+│▣ ▢ fichiers  ● ○ résolu        │ # 2 - Return                             │
+│Pwn (3/8)                       │ Catégorie : Pwn · Points : 200 · ○       │
+│ ▣ ●  0 - Overflow 100·12 solves│ Prérequis (déverrouillé) : ✔ 0 - Overflow│
+│ ▣ ○  2 - Return   200·5 solves │ Connexion : nc chal... 1389              │
+│Crypto (5/9)                    │ Can you pwn this problem? ...            │
+│ ▢ ●  First XOR    50·30 solves ├──────────────────────────────────────────┤
+│ ▢ ○  RSA          150·5 solves │ 🚩                                       │
+└ d Dl  D Sync  w Dossier  u Indice  / Rech.  f Filtre  o Tri  q Quit ──────┘
 ```
 
 Les marqueurs de chaque ligne sont rappelés par une légende en haut de la colonne de gauche :
@@ -61,7 +61,7 @@ n'est pas écrasé : une nouvelle version `desc2.txt`, `desc3.txt`, etc. est cr�
 la nature du changement. Les indices sont suivis, gratuits comme payants : ajout d'un indice,
 déblocage, ou modification de coût.
 
-### Interface à deux onglets
+### Interface à quatre onglets
 
 Onglet **Challenges** : navigation par catégorie ; pour chaque challenge, affichage de l'état de
 téléchargement (`▣`/`▢`), du statut (`●`/`○`), des points et du nombre de solves. Le panneau de
@@ -69,11 +69,12 @@ détail présente le first blood, la connexion, les **prérequis** (challenges �
 leur état et un indicateur verrouillé/déverrouillé), les fichiers et les indices. La description est
 consultable sans téléchargement. L'interface offre une recherche (`/`), des filtres (`f` : tous,
 non résolus, résolus), un tri (`o` : catégorie, points, solves), la soumission de flag (avec
-écriture de `flag.txt` si le flag est correct), le téléchargement ou la mise à jour (`d`), la
-synchronisation complète (`D`, parallèle, avec barre de progression), le déblocage d'indice (`u`),
-la copie de la connexion (`c`), l'ouverture du dossier (`w`), l'édition des notes (`e`, `notes.md`)
-et l'export vers `PROGRESS_flagship.md` (`p`, sans jamais toucher au `PROGRESS.md` de l'utilisateur).
-L'en-tête affiche le score, le rang et un **compte à rebours** jusqu'à la fin du CTF.
+écriture de `flag.txt` si le flag est correct), le téléchargement ou la mise à jour (`d`), le
+téléchargement de toute une **catégorie** (`C`), la synchronisation complète (`D`, parallèle, avec
+barre de progression), le déblocage d'indice (`u`), la copie de la connexion (`c`), l'ouverture du
+dossier (`w`), l'édition des notes (`e`, `notes.md`) et l'export vers `PROGRESS_flagship.md` (`p`,
+sans jamais toucher au `PROGRESS.md` de l'utilisateur). L'en-tête affiche le score, le rang et un
+**compte à rebours** jusqu'à la fin du CTF.
 
 À la soumission, les flags **incorrects** déjà tentés sont mémorisés : resoumettre un flag identique
 est bloqué (avec un avertissement) afin de ne pas gaspiller de tentative. Chaque tentative est aussi
@@ -82,9 +83,25 @@ journalisée dans `attempts.log` à la racine du dossier du challenge (utile pou
 Onglet **Scoreboard** : classement avec position, équipe ou joueur, et score. La ligne de
 l'utilisateur est surlignée et le curseur s'y positionne.
 
+Onglet **Stats** : récapitulatif de la progression : score et rang, nombre de résolus et points
+gagnés sur le total, challenges téléchargés, puis un tableau par catégorie (résolus, points,
+téléchargés) et des barres de progression par catégorie. Il se met à jour automatiquement. En
+**mode équipe**, une section **« Membres de l'équipe »** s'ajoute : ton rang et ton score
+individuels, puis un **tableau de tous les membres** (résolus et points de chacun, calculés depuis
+les solves de l'équipe), trié par points, ta ligne étant surlignée et marquée « (toi) ». Chaque
+**pseudo est cliquable** : un clic ouvre une fenêtre détaillant les stats de ce membre, avec ses
+sections « Par catégorie » et « Progression par catégorie » (classées par points) pour voir où
+chacun a le plus contribué.
+
+Onglet **Notifications** : l'historique des notifications (les plus récentes en haut), mis à jour en
+direct. Chaque événement y apparaît en plus du toast éphémère.
+
 **Thèmes** : plusieurs thèmes de couleurs clairs et sombres (nord, gruvbox, dracula, etc.) ; la
-touche `t` fait défiler les thèmes, et le choix est mémorisé. En **mode hors-ligne**, si l'API est
-injoignable, la dernière liste synchronisée (cache) reste affichée.
+touche `t` fait défiler les thèmes, et le choix est mémorisé. En **mode hors-ligne** (ou **après la
+fin du CTF**, quand l'API masque les challenges), Flagship réaffiche la **dernière synchronisation
+mise en cache** : liste des challenges, statuts et points, ton score/rang et le scoreboard restent
+visibles. Tout est stocké dans `<dossier-du-ctf>/.flagship/` (`challenges_cache.json`,
+`me_cache.json`, `scoreboard_cache.json`).
 
 Dans les champs de saisie (recherche et flag), le curseur est affiché sous forme de barre verticale
 `▏` (style « I-beam ») plutôt que de bloc inversé. Comme Textual masque le curseur du terminal et
@@ -95,7 +112,7 @@ rendu revient automatiquement au curseur standard.
 
 Chaque changement (nouveau challenge disponible, description modifiée, indice nouveau ou débloqué,
 flag validé, téléchargement) déclenche un toast et est journalisé dans
-`.flagship/notifications.log`. La touche `n` affiche l'historique.
+`.flagship/notifications.log`. L'onglet **Notifications** affiche l'historique (plus récentes en haut).
 
 ## Installation
 
@@ -221,6 +238,7 @@ doit être recréé à partir de `config.sh.example`.
 | clic sur les onglets | basculer entre Challenges et Scoreboard |
 | `d` | télécharger ou mettre à jour le challenge sélectionné (recrée `desc.txt` si manquant, complète les fichiers manquants dans `work/`) |
 | `D` | tout synchroniser (parallèle, barre de progression, confirmation) |
+| `C` | télécharger tous les challenges de la catégorie sous le curseur (confirmation) |
 | `/` | aller à la barre de recherche |
 | `r` | actualiser la liste immédiatement (plus scoreboard et rang) |
 | `f` | changer de filtre (tous, non résolus, résolus) |
@@ -232,7 +250,6 @@ doit être recréé à partir de `config.sh.example`.
 | `w` | ouvrir le dossier du challenge dans le gestionnaire de fichiers |
 | `e` | éditer les notes du challenge (`notes.md`, via `$EDITOR`) |
 | `p` | exporter un récapitulatif dans `PROGRESS_flagship.md` (sans toucher à `PROGRESS.md`) |
-| `n` | afficher l'historique des notifications |
 | `Échap` | quitter un champ de saisie (recherche ou flag) et revenir sur la liste |
 | `Tab` / `Maj+Tab` | déplacer le focus vers l'élément suivant ou précédent |
 | `q` | quitter |
@@ -258,8 +275,13 @@ commentaires. Aucun `source` shell n'est exécuté, ce qui évite tout effet de 
 
 `ctfd.py` encapsule l'API :
 
-- `GET /api/v1/challenges` (liste) et `GET /api/v1/challenges/<id>` (détail) ;
-- `GET /api/v1/users/me/solves` (résolus) et `GET /api/v1/scoreboard` (classement) ;
+- `GET /api/v1/challenges` (liste) et `GET /api/v1/challenges/<id>` (détail, dont les prérequis) ;
+- `GET /api/v1/users/me` ou `/api/v1/teams/me` selon le **mode détecté** (solo ou équipe), avec
+  le `/…/solves` correspondant (résolus), et `GET /api/v1/scoreboard` (classement) ;
+- en mode équipe, `GET /api/v1/teams/me/solves` fournit aussi la contribution de chaque membre
+  (chaque solve porte le membre qui l'a résolu) ;
+- `GET /api/v1/configs` est tenté pour la date de fin (compte à rebours ; souvent réservé aux admins,
+  d'où la possibilité de la fixer via `CTF_END`) ;
 - `POST /api/v1/challenges/attempt` (soumission) et `POST /api/v1/unlocks` (déblocage d'indice) ;
 - téléchargement des fichiers listés.
 
@@ -272,17 +294,19 @@ sans interrompre l'application.
   (`0 - Overflow` devient `0-Overflow`, `Bruh 0: Exif` devient `Bruh-0:-Exif`), `/` et `\`
   remplacés par `-`.
 - `list_state()` (comportement par défaut) liste les challenges avec leur statut et leur état de
-  téléchargement, sans rien créer ; `download_one()` télécharge un challenge ; `sync()`
-  (« Tout synchroniser ») télécharge l'ensemble. Ces fonctions renvoient les événements
-  (descriptions et indices modifiés sur les challenges suivis).
+  téléchargement, sans rien créer ; `download_one()` télécharge un challenge ; `download_subset()`
+  télécharge une catégorie ; `sync()` (« Tout synchroniser ») télécharge l'ensemble. Ces fonctions
+  renvoient les événements (descriptions et indices modifiés sur les challenges suivis).
 - Versionnage : un état caché `.flagship.json` par challenge mémorise les empreintes SHA-256 de la
   description et des indices. En cas de changement, un `descN.txt` est créé, sans écrasement. Avec
   `WATCH_CHANGES=false`, le détail n'est récupéré que pour les nouveaux challenges, ce qui allège
   la synchronisation mais supprime la détection de changement.
+- Tentatives de flag : les flags **incorrects** sont mémorisés dans `.flagship/attempts.json`
+  (anti-resoumission) et chaque tentative est journalisée dans `attempts.log` du challenge.
 - `write_flag()` écrit `flag.txt`, jamais par-dessus un fichier existant.
 
-Les toasts de notification sont aussi écrits dans `<base>/.flagship/notifications.log`, consultable
-avec `n`. L'état d'interface (filtre, tri, catégories pliées ou dépliées, dernière sélection) est
+Les toasts de notification sont aussi écrits dans `<base>/.flagship/notifications.log`, et consultables
+dans l'onglet **Notifications**. L'état d'interface (filtre, tri, catégories pliées ou dépliées, dernière sélection) est
 conservé dans `<base>/.flagship/state.json`, puis restauré aux reconstructions de l'arbre
 (téléchargement, rafraîchissement) et à la réouverture de la TUI.
 
@@ -320,11 +344,16 @@ Le garde-fou Drive est vérifié a posteriori, car `gdown` ne connaît pas la ta
 
 ## Notes et limites
 
-- Le statut résolu provient de l'API (`/users/me/solves`) et, à défaut, de la présence d'un
-  `flag.txt` local.
+- **Solo ou équipe** : Flagship détecte automatiquement le mode du CTF. En **mode équipe**, le
+  score, le rang et le nom affichés (en-tête, stats, surlignage du scoreboard) sont ceux de
+  **l'équipe**, et un challenge résolu par n'importe quel coéquipier apparaît comme résolu. En mode
+  solo, ce sont les informations individuelles. Aucune configuration n'est requise.
+- Le statut résolu provient de l'API (solves de l'équipe en mode équipe, sinon les siens) et, à
+  défaut, de la présence d'un `flag.txt` local.
 - Les indices sont affichés avec leur coût et leur état (verrouillé ou débloqué). Le déblocage se
   fait à la demande (touche `u`) avec confirmation, jamais automatiquement, car il coûte des points.
-- Si le CTF est terminé ou fermé, l'API renvoie un message d'erreur : Flagship l'affiche et
-  conserve l'arborescence déjà synchronisée.
+- Si le CTF est terminé ou fermé, l'API renvoie souvent un 403 : Flagship l'indique clairement
+  (token OK vs refusé) et réaffiche la dernière synchronisation en cache (challenges, points, score,
+  scoreboard), en plus de conserver l'arborescence déjà téléchargée.
 - L'outil est conçu pour CTFd (auto-hébergé ou de type sigpwny). Les autres plateformes ne sont pas
   prises en charge.

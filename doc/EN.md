@@ -9,15 +9,15 @@ clean folder tree and lets users browse them, read the briefs and submit flags w
 terminal.
 
 ```
-┌ Flagship · MyCTF · score 8270 (#3) ···· 12/40 solved · 8 dl · sort: category ┐
-│ ▣ ▢ files  ● ○ solved    │  # 2 - Return                              │
-│ Pwn (3/8)                │  Category: Pwn · Points: 200 · ○           │
-│  ▣ ●  0 - Overflow 100·12 solves │  🩸 First blood: team_x             │
-│  ▣ ○  2 - Return   200·5 solves  │  Connection: nc chal... 1389       │
-│ Crypto (5/9)             │  --- Can you pwn this problem? ...          │
-│  ▢ ●  First XOR    50·30 solves ├─────────────────────────────────────┤
-│  ▢ ○  RSA          150·5 solves │ 🚩                                   │
-└ d Download  D Sync all  / Search  f Filter  o Sort  q Quit ────────────┘
+┌ Flagship · MyCTF · score 8270 (#3) · ⏳ ends in 2h11 · 12/40 solved ─────┐
+│▣ ▢ files  ● ○ solved           │ # 2 - Return                            │
+│Pwn (3/8)                       │ Category: Pwn · Points: 200 · ○         │
+│ ▣ ●  0 - Overflow 100·12 solves│ Prerequisites (unlocked): ✔ 0 - Overflow│
+│ ▣ ○  2 - Return   200·5 solves │ Connection: nc chal... 1389             │
+│Crypto (5/9)                    │ Can you pwn this problem? ...           │
+│ ▢ ●  First XOR    50·30 solves ├─────────────────────────────────────────┤
+│ ▢ ○  RSA          150·5 solves │ 🚩                                      │
+└ d Dl  D Sync  w Folder  u Hint  / Search  f Filter  o Sort  q Quit ──────┘
 ```
 
 A legend at the top of the left column recalls each line's markers: `▣`/`▢` for downloaded files,
@@ -58,7 +58,7 @@ not overwritten: a new version `desc2.txt`, `desc3.txt`, and so on is written, w
 the nature of the change. Hints are tracked, free and paid alike: a new hint, an unlock, or a cost
 change.
 
-### Two-tab interface
+### Four-tab interface
 
 **Challenges** tab: browsing by category; for each challenge, display of the download state
 (`▣`/`▢`), the status (`●`/`○`), the points and the solve count. The detail panel shows the first blood,
@@ -66,10 +66,10 @@ the connection, the **prerequisites** (challenges to solve first, with their sta
 locked/unlocked indicator), the files and the hints. The description is viewable without downloading.
 The interface provides a search (`/`), filters (`f`: all, unsolved, solved), a sort (`o`: category,
 points, solves), flag submission (writing `flag.txt` if the flag is correct), download or update
-(`d`), full synchronization (`D`, parallel, with a progress bar), hint unlock (`u`), connection
-copy (`c`), open folder (`w`), notes editing (`e`, `notes.md`) and export to `PROGRESS_flagship.md`
-(`p`, without ever touching the user's `PROGRESS.md`). The header shows the current score, rank and a
-**countdown** to the end of the CTF.
+(`d`), download of a whole **category** (`C`), full synchronization (`D`, parallel, with a progress
+bar), hint unlock (`u`), connection copy (`c`), open folder (`w`), notes editing (`e`, `notes.md`)
+and export to `PROGRESS_flagship.md` (`p`, without ever touching the user's `PROGRESS.md`). The header
+shows the current score, rank and a **countdown** to the end of the CTF.
 
 On submission, **incorrect** flags already tried are remembered: resubmitting an identical flag is
 blocked (with a warning) so a submission attempt is not wasted. Every attempt is also logged to
@@ -78,9 +78,23 @@ blocked (with a warning) so a submission attempt is not wasted. Every attempt is
 **Scoreboard** tab: ranking with position, team or player, and score. The user's row is highlighted
 and the cursor jumps to it.
 
+**Stats** tab: a progress summary: score and rank, number solved and points earned out of the total,
+downloaded challenges, then a per-category table (solved, points, downloaded) and per-category
+progress bars. It updates automatically. In **team mode**, a **"Team members"** section is
+added: your individual rank and score, then a **table of all members** (each one's solves and points,
+computed from the team's solves), sorted by points, with your row highlighted and marked "(you)". Each
+**name is clickable**: a click opens a window detailing that member's stats, with their "By category"
+and "Per-category progress" sections (sorted by points) to see where each one contributed most.
+
+**Notifications** tab: the notification history (most recent on top), updated live. Every event also
+appears here in addition to the transient toast.
+
 **Themes**: several light and dark colour themes (nord, gruvbox, dracula, and more); the `t` key
-cycles through them, and the choice is remembered. In **offline mode**, when the API is unreachable,
-the last synced list (cache) remains shown.
+cycles through them, and the choice is remembered. In **offline mode** (or **after the CTF ends**,
+when the API hides the challenges), Flagship shows the **last cached synchronization**: challenge
+list, statuses and points, your score/rank and the scoreboard all remain visible. Everything is
+stored under `<ctf-folder>/.flagship/` (`challenges_cache.json`, `me_cache.json`,
+`scoreboard_cache.json`).
 
 In the input fields (search and flag), the cursor is drawn as a vertical bar `▏` ("I-beam" style)
 rather than a reversed block. Since Textual hides the terminal cursor and draws its own within a
@@ -90,8 +104,8 @@ the standard cursor.
 ### Notifications
 
 Every change (new challenge available, modified description, new or unlocked hint, accepted flag,
-download) triggers a toast and is logged to `.flagship/notifications.log`. The `n` key shows the
-history.
+download) triggers a toast and is logged to `.flagship/notifications.log`. The **Notifications** tab
+shows the history (most recent on top).
 
 ## Installation
 
@@ -215,6 +229,7 @@ from `config.sh.example`.
 | click the tabs | switch between Challenges and Scoreboard |
 | `d` | download or update the selected challenge (recreates `desc.txt` if missing, completes missing files in `work/`) |
 | `D` | sync all (parallel, progress bar, confirmation) |
+| `C` | download every challenge in the category under the cursor (confirmation) |
 | `/` | focus the search bar |
 | `r` | refresh the list now (plus scoreboard and rank) |
 | `f` | cycle filter (all, unsolved, solved) |
@@ -226,7 +241,6 @@ from `config.sh.example`.
 | `w` | open the challenge folder in the file manager |
 | `e` | edit the challenge notes (`notes.md`, via `$EDITOR`) |
 | `p` | export a summary to `PROGRESS_flagship.md` (never touches `PROGRESS.md`) |
-| `n` | show the notifications history |
 | `Esc` | leave an input field (search or flag) and return to the list |
 | `Tab` / `Shift+Tab` | move focus to the next or previous element |
 | `q` | quit |
@@ -251,8 +265,13 @@ flagship/
 
 `ctfd.py` wraps the API:
 
-- `GET /api/v1/challenges` (list) and `GET /api/v1/challenges/<id>` (detail);
-- `GET /api/v1/users/me/solves` (solved) and `GET /api/v1/scoreboard` (ranking);
+- `GET /api/v1/challenges` (list) and `GET /api/v1/challenges/<id>` (detail, including prerequisites);
+- `GET /api/v1/users/me` or `/api/v1/teams/me` depending on the **detected mode** (solo or team),
+  with the matching `/…/solves` (solved), and `GET /api/v1/scoreboard` (ranking);
+- in team mode, `GET /api/v1/teams/me/solves` also provides each member's contribution (every solve
+  carries the member who solved it);
+- `GET /api/v1/configs` is attempted for the end date (countdown; often admin-only, hence the
+  `CTF_END` option);
 - `POST /api/v1/challenges/attempt` (submission) and `POST /api/v1/unlocks` (hint unlock);
 - download of listed files.
 
@@ -265,16 +284,19 @@ without crashing the application.
   (`0 - Overflow` becomes `0-Overflow`, `Bruh 0: Exif` becomes `Bruh-0:-Exif`), `/` and `\`
   replaced by `-`.
 - `list_state()` (default behaviour) lists challenges with their status and download state,
-  creating nothing; `download_one()` downloads one challenge; `sync()` ("Sync all") downloads
-  everything. These functions return the events (descriptions and hints changed on tracked
-  challenges).
+  creating nothing; `download_one()` downloads one challenge; `download_subset()` downloads a
+  category; `sync()` ("Sync all") downloads everything. These functions return the events
+  (descriptions and hints changed on tracked challenges).
 - Versioning: a hidden `.flagship.json` per challenge stores SHA-256 fingerprints of the
   description and hints. On change, a `descN.txt` is written, never overwritten. With
   `WATCH_CHANGES=false`, the detail is fetched only for new challenges, which lightens the sync but
   removes change detection.
+- Flag attempts: **incorrect** flags are remembered in `.flagship/attempts.json` (to block
+  resubmission) and every attempt is logged to the challenge's `attempts.log`.
 - `write_flag()` writes `flag.txt`, never over an existing one.
 
-Notification toasts are also written to `<base>/.flagship/notifications.log`, viewable with `n`. The
+Notification toasts are also written to `<base>/.flagship/notifications.log`, viewable in the
+**Notifications** tab. The
 UI state (filter, sort, collapsed or expanded categories, last selection) is kept in
 `<base>/.flagship/state.json`, then restored across tree rebuilds (download, refresh) and when the
 TUI is reopened.
@@ -312,10 +334,15 @@ know the size upfront.
 
 ## Notes and limitations
 
-- The solved status comes from the API (`/users/me/solves`) and, failing that, from a local
-  `flag.txt`.
+- **Solo or team**: Flagship detects the CTF mode automatically. In **team mode**, the displayed
+  score, rank and name (header, stats, scoreboard highlight) are the **team's**, and a challenge
+  solved by any teammate shows as solved. In solo mode, individual information is used. No
+  configuration required.
+- The solved status comes from the API (the team's solves in team mode, otherwise one's own) and,
+  failing that, from a local `flag.txt`.
 - Hints are displayed with their cost and state (locked or unlocked). Unlocking is on demand (`u`
   key) with confirmation, never automatic, since it costs points.
-- If the CTF is over or closed, the API returns an error message: Flagship shows it and keeps the
-  already-synced tree.
+- If the CTF is over or closed, the API often returns a 403: Flagship states it clearly (token OK vs
+  refused) and shows the last cached synchronization (challenges, points, score, scoreboard), on top
+  of keeping the already-downloaded tree.
 - Built for CTFd (self-hosted or sigpwny-style). Other platforms are not supported.

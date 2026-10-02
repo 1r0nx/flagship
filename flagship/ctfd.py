@@ -24,6 +24,7 @@ class CTFd:
             }
         )
         self.timeout = timeout
+        self._account_base: str | None = None  # '/api/v1/teams/me' (équipe) ou '/api/v1/users/me' (solo)
 
     # -- helpers ---------------------------------------------------------
     def _get(self, path: str) -> dict:
@@ -67,14 +68,45 @@ class CTFd:
         """Liste des challenges visibles (id, name, category, value, solves...)."""
         return self._get("/api/v1/challenges").get("data", []) or []
 
+    def auth_ok(self) -> bool:
+        """True si le token est accepté par l'API (GET /users/me réussit). Sert à distinguer
+        un token invalide d'un simple refus d'accès aux challenges (CTF terminé/masqués)."""
+        try:
+            self._get("/api/v1/users/me")
+            return True
+        except CTFdError:
+            return False
+
     def challenge(self, cid: int) -> dict:
         """Détail d'un challenge (description, files, hints, connection_info...)."""
         return self._get(f"/api/v1/challenges/{cid}").get("data", {}) or {}
 
+    def _account(self) -> str:
+        """Endpoint du « compte » pertinent pour la compétition : l'ÉQUIPE en mode équipe,
+        sinon l'utilisateur. Détecté une seule fois puis mémorisé.
+
+        En mode équipe, le score, le rang et surtout les RÉSOLUS qui comptent sont au niveau de
+        l'équipe (un flag posé par un coéquipier doit apparaître résolu). `/api/v1/teams/me`
+        échoue en mode solo (teams désactivées) : on retombe alors sur l'utilisateur.
+        """
+        if self._account_base is None:
+            self._account_base = "/api/v1/users/me"
+            try:
+                d = self._get("/api/v1/teams/me").get("data") or {}
+                if d.get("id"):
+                    self._account_base = "/api/v1/teams/me"
+            except CTFdError:
+                pass
+        return self._account_base
+
+    def is_team_mode(self) -> bool:
+        """True si le CTF est en mode équipe (le compte pertinent est une équipe)."""
+        return self._account().startswith("/api/v1/teams")
+
     def solved_ids(self) -> set[int]:
-        """Ensemble des ids résolus par l'utilisateur courant."""
+        """Ensemble des ids résolus par le compte pertinent (ÉQUIPE en mode équipe, sinon soi)."""
         try:
-            data = self._get("/api/v1/users/me/solves").get("data", []) or []
+            data = self._get(self._account() + "/solves").get("data", []) or []
         except CTFdError:
             return set()
         out = set()
@@ -93,12 +125,53 @@ class CTFd:
         return data.get("status", "?"), data.get("message", "")
 
     def me(self) -> dict:
-        """Profil courant : {name, score, place}. Vide si indisponible."""
+        """Compte pertinent : {name, score, place, team}. En mode équipe, renvoie l'ÉQUIPE
+        (nom, score et rang de l'équipe) pour que l'en-tête, les stats et le surlignage du
+        scoreboard correspondent au classement réel. Vide si indisponible."""
+        base = self._account()
+        try:
+            d = self._get(base).get("data", {}) or {}
+        except CTFdError:
+            return {}
+        return {"name": d.get("name"), "score": d.get("score"),
+                "place": d.get("place"), "team": base.startswith("/api/v1/teams")}
+
+    def me_user(self) -> dict:
+        """Profil INDIVIDUEL (toujours /users/me) : {id, name, score, place}. Utile en mode
+        équipe pour afficher tes stats perso en plus de celles de l'équipe. Vide si indisponible."""
         try:
             d = self._get("/api/v1/users/me").get("data", {}) or {}
         except CTFdError:
             return {}
-        return {"name": d.get("name"), "score": d.get("score"), "place": d.get("place")}
+        return {"id": d.get("id"), "name": d.get("name"),
+                "score": d.get("score"), "place": d.get("place")}
+
+    def team_member_stats(self) -> list[dict]:
+        """Mode équipe : contribution par membre, d'après les solves de l'équipe.
+
+        Chaque solve CTFd porte le membre qui l'a résolu (`user: {id, name}`), donc un seul appel
+        suffit. Retourne [{user_id, name, count, solved_ids}] (membres ayant au moins 1 solve).
+        """
+        if not self.is_team_mode():
+            return []
+        try:
+            data = self._get("/api/v1/teams/me/solves").get("data", []) or []
+        except CTFdError:
+            return []
+        agg: dict[int, dict] = {}
+        for s in data:
+            u = s.get("user") or {}
+            uid = u.get("id")
+            if uid is None:
+                continue
+            m = agg.setdefault(int(uid), {"user_id": int(uid),
+                                          "name": u.get("name", f"#{uid}"),
+                                          "count": 0, "solved_ids": []})
+            cid = s.get("challenge_id") or (s.get("challenge") or {}).get("id")
+            m["count"] += 1
+            if cid is not None:
+                m["solved_ids"].append(int(cid))
+        return list(agg.values())
 
     def first_blood(self, cid: int) -> str | None:
         """Nom du premier solveur d'un challenge (first blood), si dispo."""
