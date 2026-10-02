@@ -12,6 +12,7 @@ Format attendu (lignes `CLE=valeur`, `export` et guillemets tolérés) :
     AUTO_UNLOCK_FREE_HINTS=false # débloquer automatiquement les indices gratuits
     DOWNLOAD_WORKERS=6           # téléchargements parallèles pour « Tout synchroniser »
     THEME=textual-dark           # thème de couleurs de départ
+    CTF_END=2026-10-05T18:00     # fin du CTF (compte à rebours) ; epoch ou ISO ; vide = auto via API
 
 Le token n'est jamais affiché ni exécuté (pas de `source` shell ; simple parsing CLE=valeur).
 """
@@ -65,7 +66,7 @@ class Config:
     auto_unlock_free_hints: bool  # débloquer automatiquement les indices à coût 0
     download_workers: int  # téléchargements parallèles pour « Tout synchroniser »
     theme: str  # thème de couleurs de départ (ex. textual-dark, nord, gruvbox, dracula…)
-    token_var: str  # nom réel de la variable du token (pour ne jamais l'afficher)
+    ctf_end: str  # fin du CTF pour le compte à rebours (epoch ou ISO ; vide = auto via API)
 
     @classmethod
     def load(cls, path: str | Path) -> "Config":
@@ -79,15 +80,15 @@ class Config:
         url = url.rstrip("/")
 
         # Token : accepte CTFD_TOKEN, TOKEN, ou toute variable *TOKEN* (ex. PWNY_CTFD_TOKEN)
-        token, token_var = "", "CTFD_TOKEN"
+        token = ""
         for k in ("CTFD_TOKEN", "TOKEN"):
             if d.get(k):
-                token, token_var = d[k], k
+                token = d[k]
                 break
         if not token:
-            for k, v in d.items():
-                if k.upper().endswith("TOKEN") and v:
-                    token, token_var = v, k
+            for _k, v in d.items():
+                if _k.upper().endswith("TOKEN") and v:
+                    token = v
                     break
 
         if not url or not token:
@@ -110,5 +111,5 @@ class Config:
             auto_unlock_free_hints=_as_bool(d.get("AUTO_UNLOCK_FREE_HINTS"), False),
             download_workers=max(1, int(d.get("DOWNLOAD_WORKERS") or 6)),
             theme=(d.get("THEME") or "textual-dark").strip(),
-            token_var=token_var,
+            ctf_end=(d.get("CTF_END") or "").strip(),
         )

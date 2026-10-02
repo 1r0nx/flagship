@@ -44,17 +44,17 @@ class CTFd:
     def _json(r: requests.Response) -> dict:
         # messages clairs selon le code HTTP
         if r.status_code in (401, 403):
-            raise CTFdError("accès refusé — token invalide/expiré ou challenge verrouillé (HTTP %d)" % r.status_code)
+            raise CTFdError("accès refusé : token invalide/expiré ou challenge verrouillé (HTTP %d)" % r.status_code)
         if r.status_code == 429:
-            raise CTFdError("trop de requêtes (429) — réessaie dans un instant (rate-limit CTFd)")
+            raise CTFdError("trop de requêtes (429) : réessayer dans un instant (rate-limit CTFd)")
         if r.status_code == 404:
-            raise CTFdError("introuvable (404) — mauvais URL/endpoint ou ressource absente")
+            raise CTFdError("introuvable (404) : mauvais URL/endpoint ou ressource absente")
         if r.status_code >= 500:
             raise CTFdError(f"erreur serveur CTFd (HTTP {r.status_code})")
         try:
             data = r.json()
         except ValueError:
-            raise CTFdError(f"réponse non-JSON (HTTP {r.status_code}) — l'URL pointe-t-elle bien vers un CTFd ?")
+            raise CTFdError(f"réponse non-JSON (HTTP {r.status_code}) : l'URL pointe-t-elle bien vers un CTFd ?")
         if isinstance(data, dict) and data.get("success") is False:
             raise CTFdError(str(data.get("message") or data.get("errors") or "échec API"))
         # certains messages (CTF terminé/pas commencé) arrivent sans "success"
@@ -153,6 +153,27 @@ class CTFd:
     def file_url(self, file_path: str) -> str:
         """URL complète (avec token de fichier) telle que fournie par l'API."""
         return file_path if file_path.startswith("http") else self.url + file_path
+
+    def ctf_end(self) -> float | None:
+        """Timestamp (epoch, secondes) de fin du CTF si l'API l'expose, sinon None.
+
+        L'endpoint `/api/v1/configs` est souvent réservé aux admins : en cas de refus
+        (401/403) ou d'absence de la clé, on retourne None silencieusement (la fin peut
+        alors être fournie manuellement via CTF_END dans config.sh).
+        """
+        try:
+            data = self._get("/api/v1/configs").get("data", [])
+        except CTFdError:
+            return None
+        if isinstance(data, dict):
+            data = [{"key": k, "value": v} for k, v in data.items()]
+        for row in data or []:
+            if isinstance(row, dict) and row.get("key") == "end" and row.get("value"):
+                try:
+                    return float(row["value"])
+                except (TypeError, ValueError):
+                    return None
+        return None
 
 
 def _stream_to(r: "requests.Response", dest, max_bytes: int) -> tuple[str, str]:

@@ -134,7 +134,19 @@ def _ext_block(ext_links: list[str]) -> str:
     return "\n" + "\n".join(f"            - [{classify_link(u)}] {u}" for u in ext_links)
 
 
+def prereq_ids(detail: dict) -> list:
+    """Ids des challenges prérequis (CTFd `requirements`), quel que soit le format."""
+    req = detail.get("requirements")
+    if isinstance(req, dict):
+        return list(req.get("prerequisites") or [])
+    if isinstance(req, list):
+        return list(req)
+    return []
+
+
 def _desc_text(detail: dict, file_urls, ext_links, header: str = "") -> str:
+    pr = prereq_ids(detail)
+    prereq = ", ".join(str(i) for i in pr) if pr else "aucun"
     body = (
         f"Nom        : {detail.get('name','?')}\n"
         f"Catégorie  : {detail.get('category','?')}\n"
@@ -143,6 +155,7 @@ def _desc_text(detail: dict, file_urls, ext_links, header: str = "") -> str:
         f"ID         : {detail.get('id','?')}\n\n"
         f"Description :\n{clean_desc(detail.get('description'))}\n\n"
         f"Connexion : {detail.get('connection_info') or 'aucune'}\n"
+        f"Prérequis (ids) : {prereq}\n"
         f"Fichiers (plateforme, -> work/) : {_files_block(file_urls)}\n"
         f"Liens externes : {_ext_block(ext_links)}\n"
         f"Indices   : {_hints_lines(detail)}\n"
@@ -232,7 +245,7 @@ def download_external(url: str, dest_dir: Path, max_bytes: int = MAX_BYTES) -> t
     if kind == "mega":
         tool = shutil.which("megadl") or shutil.which("megatools")
         if not tool:
-            return "manual", "MEGA : pas d'outil (megatools) — manuel"
+            return "manual", "MEGA : pas d'outil megatools, récupération manuelle"
         try:
             cmd = ([tool, "--path", str(dest_dir), url] if tool.endswith("megadl")
                    else [tool, "dl", "--path", str(dest_dir), url])
@@ -270,10 +283,10 @@ def _do_downloads(client, d: Path, detail, file_urls, ext_links) -> list[str]:
             report.append(f"[skip] work/{base} (déjà présent)")
             continue
         status, info = client.download(f, dest)
-        report.append(f"[{status}] work/{base} — {info}")
+        report.append(f"[{status}] work/{base} : {info}")
     for u in ext_links:
         status, info = download_external(u, work)
-        report.append(f"[{status}] {u} — {info}")
+        report.append(f"[{status}] {u} : {info}")
     if report:
         (d / "downloads.txt").write_text(
             "# Rapport de téléchargement Flagship (fichiers -> work/)\n"
@@ -348,7 +361,7 @@ def ensure_challenge(client: CTFd, base_dir: Path, summary: dict, watch: bool,
             what.append("indices")
         events.extend(hint_evs)
         ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-        header = f"# Version {version} — {ts} (changement : {', '.join(what)})\n\n"
+        header = f"# Version {version} · {ts} (changement : {', '.join(what)})\n\n"
         (d / f"desc{version}.txt").write_text(_desc_text(detail, file_urls, ext_links, header), encoding="utf-8")
         _save_state(d, {"desc_hash": desc_hash, "hints": hints_now, "version": version})
     return d, events, detail
@@ -471,13 +484,62 @@ def write_flag(path, flag: str) -> None:
         p.write_text(flag.strip() + "\n", encoding="utf-8")
 
 
+# ------------------------------------------------------------ tentatives de flag
+def _attempts_path(base_dir: Path) -> Path:
+    return base_dir / ".flagship" / "attempts.json"
+
+
+def load_attempts(base_dir: Path) -> dict:
+    """Index central {id_challenge: [flags incorrects déjà soumis]}."""
+    try:
+        return json.loads(_attempts_path(base_dir).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def was_attempted(base_dir: Path, cid: int, flag: str) -> bool:
+    """True si ce flag a DÉJÀ été soumis et refusé pour ce challenge."""
+    return flag.strip() in load_attempts(base_dir).get(str(cid), [])
+
+
+def record_attempt(base_dir: Path, cid: int, flag: str, correct: bool, path: str | None = None) -> None:
+    """Journalise une tentative. Mémorise les flags INCORRECTS pour éviter de les resoumettre.
+
+    - Écrit un journal lisible `attempts.log` dans le dossier du challenge (si présent), utile
+      pour un writeup ; n'écrase jamais rien (append only).
+    - Indexe les flags incorrects dans `.flagship/attempts.json` (anti-resoumission).
+    """
+    flag = flag.strip()
+    if path:
+        d = Path(path)
+        if d.exists():
+            try:
+                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                with open(d / "attempts.log", "a", encoding="utf-8") as f:
+                    f.write(f"[{ts}] {'OK ' if correct else 'KO '} : {flag}\n")
+            except OSError:
+                pass
+    if correct:
+        return
+    try:
+        p = _attempts_path(base_dir)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        data = load_attempts(base_dir)
+        lst = data.setdefault(str(cid), [])
+        if flag not in lst:
+            lst.append(flag)
+        p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    except (OSError, TypeError):
+        pass
+
+
 def write_progress(base_dir: Path, challenges: list[dict], ctf_name: str = "CTF") -> Path:
-    """Génère un PROGRESS.md récapitulatif à la racine de base_dir."""
+    """Génère un PROGRESS_flagship.md récapitulatif à la racine de base_dir."""
     rows = sorted(challenges, key=lambda c: (c.get("category", ""), c.get("value", 0), c.get("name", "")))
     solved = sum(1 for c in challenges if c.get("solved"))
     dl = sum(1 for c in challenges if c.get("downloaded"))
     lines = [
-        f"# PROGRESS — {ctf_name}", "",
+        f"# PROGRESS · {ctf_name}", "",
         f"{solved}/{len(challenges)} résolus · {dl} téléchargés · "
         f"généré le {datetime.now().strftime('%Y-%m-%d %H:%M')}", "",
         "| Catégorie | Challenge | Points | Solves | Résolu | Téléchargé |",

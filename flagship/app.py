@@ -1,8 +1,8 @@
-"""Flagship — TUI Textual pour un CTFd.
+"""Flagship : TUI Textual pour un CTFd.
 
 Onglets Challenges / Scoreboard ; listing léger par défaut, téléchargement à la demande
 (`d`) ou complet (`D`, parallèle + barre de progression) ; recherche, tri, filtres ;
-soumission, déblocage d'indice, copier la connexion, notes externes, export PROGRESS.md ;
+soumission, déblocage d'indice, copier la connexion, notes externes, export PROGRESS_flagship.md ;
 notifications (toasts + journal + historique). Le token n'est jamais affiché.
 
 Lancement : python -m flagship [chemin/config.sh]
@@ -25,11 +25,64 @@ from textual.widgets import (
 )
 from textual import work
 from textual.binding import Binding
+from textual.strip import Strip
 from rich.text import Text
+from rich.segment import Segment
+from rich.style import Style
+from rich.cells import cell_len
 
 from .config import Config
 from .ctfd import CTFd, CTFdError
 from . import store
+
+BEAM_CHAR = "▏"  # barre verticale fine (U+258F) pour simuler un curseur I-beam
+
+
+class BeamInput(Input):
+    """Champ de saisie dont le curseur est une barre verticale (« I-beam ») au lieu du
+    bloc inversé par défaut.
+
+    Le bloc natif de Textual est neutralisé (son style est rendu vide le temps du rendu),
+    puis une unique barre est dessinée à la position du curseur. On évite ainsi tout
+    « double curseur » (barre + reste de bloc) sur le premier caractère d'un placeholder
+    large (emoji). En cas d'incompatibilité, repli silencieux sur le curseur standard."""
+
+    _suppress_native_cursor = False
+
+    def get_component_rich_style(self, *names, **kwargs):
+        # neutralise seulement le style du curseur natif pendant notre propre rendu
+        if self._suppress_native_cursor and names == ("input--cursor",):
+            return Style()
+        return super().get_component_rich_style(*names, **kwargs)
+
+    def render_line(self, y: int) -> Strip:
+        # 1re ligne, champ focus, curseur visible (respecte le clignotement)
+        if y != 0 or not self.has_focus or not self._cursor_visible:
+            return super().render_line(y)
+        try:
+            # 1) rendu normal mais SANS le bloc du curseur natif
+            self._suppress_native_cursor = True
+            strip = super().render_line(y)
+            self._suppress_native_cursor = False
+
+            # couleur de la barre = couleur de remplissage du bloc natif (suit le thème)
+            cur = super().get_component_rich_style("input--cursor")
+            bar_style = self.rich_style + Style(color=cur.bgcolor, bold=True)
+            bar = Strip([Segment(BEAM_CHAR, bar_style)])
+            width = strip.cell_length
+
+            # 2) colonne visuelle du curseur (gère les caractères larges)
+            col = cell_len(self.value[: self.cursor_position]) - self.scroll_offset.x
+            if col < 0 or col > width:
+                return super().render_line(y)
+
+            # 3) remplace l'unique cellule du curseur par la barre
+            left = strip.crop(0, col)
+            right = strip.crop(col + 1, width)
+            return Strip.join([left, bar, right])
+        except Exception:
+            self._suppress_native_cursor = False
+            return super().render_line(y)  # repli : curseur par défaut
 
 FILTERS = ("all", "unsolved", "solved")
 FILTER_LABEL = {"all": "tous", "unsolved": "non résolus", "solved": "résolus"}
@@ -84,11 +137,13 @@ class NotificationsScreen(ModalScreen[None]):
 class Flagship(App):
     CSS = """
     #search { dock: top; }
-    #tree { width: 42%; border-right: solid $accent; }
+    #treecol { width: 42%; border-right: solid $accent; }
+    #legend { height: 1; padding: 0 1; background: $panel; color: $text-muted; }
+    #tree { height: 1fr; }
     #rightcol { width: 1fr; }
     #detailwrap { height: 1fr; }
     #detail { padding: 0 1; }
-    #flag { height: 3; border-top: solid $accent; }
+    #flag { height: 3; border: solid $accent; padding: 0 1; }
     #progress { dock: bottom; height: 1; display: none; }
     #scoreboard { height: 1fr; }
     """
@@ -104,6 +159,7 @@ class Flagship(App):
         ("s", "focus_flag", "Soumettre"),
         ("u", "unlock_hint", "Indice"),
         ("c", "copy_conn", "Copier"),
+        ("w", "open_folder", "Dossier"),
         ("e", "edit_notes", "Notes"),
         ("p", "export_progress", "Progress"),
         ("n", "show_notifs", "Notifs"),
@@ -130,28 +186,51 @@ class Flagship(App):
         self._first_sync = True
         self._syncing = False               # True pendant « Tout synchroniser » (évite l'annulation par le poll)
         self._tree_sig = None               # signature des données affichées (évite les rebuilds inutiles)
+        self._ctf_end = self._parse_end(cfg.ctf_end)  # epoch de fin (compte à rebours) ou None
         self._log_path = cfg.base_dir / ".flagship" / "notifications.log"
         self._state_path = cfg.base_dir / ".flagship" / "state.json"
+
+    @staticmethod
+    def _parse_end(raw: str | None) -> float | None:
+        """Interprète CTF_END : epoch (nombre) ou date ISO (ex. 2026-10-05T18:00)."""
+        raw = (raw or "").strip()
+        if not raw:
+            return None
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "")).timestamp()
+        except ValueError:
+            return None
 
     # -- layout ----------------------------------------------------------
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        yield Input(placeholder="🔎 Rechercher…  ( / )", id="search")
+        # espace en tête : le curseur I-beam clignote dessus (col 0) sans masquer l'emoji
+        yield BeamInput(placeholder=" 🔎 Rechercher…  ( / )", id="search")
         with TabbedContent(initial="tab-chal"):
             with TabPane("Challenges", id="tab-chal"):
                 with Horizontal():
-                    yield Tree("Challenges", id="tree")
+                    with Vertical(id="treecol"):
+                        yield Static(
+                            "[cyan]▣[/cyan] [grey42]▢[/grey42] fichiers    "
+                            "[green]●[/green] [grey42]○[/grey42] résolu",
+                            id="legend")
+                        yield Tree("Challenges", id="tree")
                     with Vertical(id="rightcol"):
                         with VerticalScroll(id="detailwrap"):
                             yield Markdown("*Sélectionne un challenge à gauche.*", id="detail")
-                        yield Input(placeholder="🚩 Flag (Entrée = soumettre le challenge sélectionné)…", id="flag")
+                        # espace en tête : le curseur I-beam clignote dessus sans masquer l'emoji
+                        yield BeamInput(placeholder=" 🚩", id="flag")
             with TabPane("Scoreboard", id="tab-score"):
                 yield DataTable(id="scoreboard")
         yield ProgressBar(id="progress", show_eta=False)
         yield Footer()
 
     def on_mount(self) -> None:
-        self.title = f"Flagship — {self.cfg.ctf_name}"
+        self._update_title()
         self.query_one("#tree", Tree).show_root = False
         dt = self.query_one("#scoreboard", DataTable)
         dt.add_columns("#", "Équipe / Joueur", "Score")
@@ -164,6 +243,10 @@ class Flagship(App):
         self.list_worker()
         self.scoreboard_worker()
         self.me_worker()
+        if self._ctf_end is None:        # fin non fournie par config.sh : tenter l'API
+            self.ctf_meta_worker()
+        self._update_title()
+        self.set_interval(30, self._update_title)  # rafraîchit le compte à rebours
         if self.cfg.poll_interval and self.cfg.poll_interval > 0:
             self.set_interval(self.cfg.poll_interval, self.list_worker)
             self.set_interval(self.cfg.poll_interval, self.scoreboard_worker)
@@ -233,13 +316,45 @@ class Flagship(App):
         if me:
             self.call_from_thread(self._apply_me, me)
 
+    @work(thread=True, exclusive=True, group="ctfmeta")
+    def ctf_meta_worker(self) -> None:
+        end = self.client.ctf_end()
+        if end:
+            self.call_from_thread(self._set_ctf_end, end)
+
+    def _set_ctf_end(self, end: float) -> None:
+        self._ctf_end = end
+        self._update_title()
+
+    def _countdown_str(self) -> str:
+        """Texte du compte à rebours (ou '' si pas de fin connue)."""
+        if not self._ctf_end:
+            return ""
+        rem = int(self._ctf_end - datetime.now().timestamp())
+        if rem <= 0:
+            return "⏳ terminé"
+        mins, _ = divmod(rem, 60)
+        hours, mins = divmod(mins, 60)
+        days, hours = divmod(hours, 24)
+        if days:
+            return f"⏳ fin dans {days}j{hours:02d}h"
+        if hours:
+            return f"⏳ fin dans {hours}h{mins:02d}"
+        return f"⏳ fin dans {mins}min"
+
+    def _update_title(self) -> None:
+        parts = [f"Flagship · {self.cfg.ctf_name}"]
+        s, p = self.me.get("score"), self.me.get("place")
+        if s is not None:
+            parts.append(f"score {s}" + (f" (#{p})" if p else ""))
+        cd = self._countdown_str()
+        if cd:
+            parts.append(cd)
+        self.title = " · ".join(parts)
+
     def _apply_me(self, me: dict) -> None:
         self.me = me
-        s, p = me.get("score"), me.get("place")
-        extra = ""
-        if s is not None:
-            extra = f" — score {s}" + (f" (#{p})" if p else "")
-        self.title = f"Flagship — {self.cfg.ctf_name}{extra}"
+        self._update_title()
         if self._last_scoreboard:  # re-surligner ta ligne sans refetch
             self._fill_scoreboard(self._last_scoreboard)
 
@@ -398,11 +513,12 @@ class Flagship(App):
                 node = tree.root.add(f"[b]{cat}[/b] ({n_solved}/{len(items)})",
                                      data={"_cat": cat}, expand=cat not in self.collapsed_cats)
                 for c in items:
-                    mark = "[green]✔[/green]" if c.get("solved") else "[grey50]○[/grey50]"
-                    dlm = "[cyan]✓[/cyan]" if c.get("downloaded") else "[yellow]⬇[/yellow]"
+                    # colonne 1 = téléchargé (carré/boîte) · colonne 2 = résolu (cercle)
+                    mark = "[b green]●[/b green]" if c.get("solved") else "[grey42]○[/grey42]"
+                    dlm = "[b cyan]▣[/b cyan]" if c.get("downloaded") else "[grey42]▢[/grey42]"
                     slv = c.get("solves")
-                    stail = f"  [dim]{c.get('value','')}pt · {slv}✓[/dim]" if slv is not None else f"  [dim]{c.get('value','')}pt[/dim]"
-                    node.add_leaf(f"{mark}{dlm} {c.get('name','?')}{stail}", data=c)
+                    stail = f"   [dim]{c.get('value','')}pt · {slv} solves[/dim]" if slv is not None else f"   [dim]{c.get('value','')}pt[/dim]"
+                    node.add_leaf(f"{dlm} {mark}  {c.get('name','?')}{stail}", data=c)
         finally:
             self._building = False
 
@@ -446,7 +562,7 @@ class Flagship(App):
 
     def _render_detail(self, c: dict, loading: bool = False) -> None:
         files = [Path(f.split("?")[0]).name for f in (c.get("files") or [])]
-        status = "✔ résolu" if c.get("solved") else "○ non résolu"
+        status = "● résolu" if c.get("solved") else "○ non résolu"
         cid = int(c.get("id", -1))
         meta = f"**Catégorie** : {c.get('category','?')}  ·  **Points** : {c.get('value','?')}  ·  **{status}**"
         if c.get("solves") is not None:
@@ -456,8 +572,20 @@ class Flagship(App):
         if fb:
             md.append(f"🩸 **First blood** : {fb}")
         md.append(f"**Connexion** : `{c.get('connection_info') or 'aucune'}`")
+        prereqs = store.prereq_ids(c)
+        if prereqs:
+            by_id = {int(x["id"]): x for x in self.challenges if x.get("id") is not None}
+            parts, all_ok = [], True
+            for pid in prereqs:
+                pc = by_id.get(int(pid))
+                name = pc.get("name") if pc else f"#{pid}"
+                ok = bool(pc and pc.get("solved"))
+                all_ok = all_ok and ok
+                parts.append(f"{'✔' if ok else '🔒'} {name}")
+            lock = "déverrouillé" if all_ok else "🔒 verrouillé"
+            md.append(f"**Prérequis** ({lock}) : " + ", ".join(parts))
         if c.get("path"):
-            md.append(f"**Dossier** : `{c['path']}`  ·  téléchargé : {'oui' if c.get('downloaded') else 'non (touche d)'}")
+            md.append(f"**Dossier** : `{c['path']}`  ·  {'▣ téléchargé' if c.get('downloaded') else '▢ non téléchargé (touche d)'}")
         if files:
             md.append("**Fichiers** (→ work/) : " + ", ".join(f"`{f}`" for f in files))
         ext = store.extract_links(c.get("description"))
@@ -471,7 +599,7 @@ class Flagship(App):
                 if h.get("content"):
                     hl.append(f"- **#{h.get('id')}** (débloqué, {tag}) : {h['content']}")
                 else:
-                    hl.append(f"- **#{h.get('id')}** (verrouillé, {tag}) — `u` pour débloquer")
+                    hl.append(f"- **#{h.get('id')}** (verrouillé, {tag}) : `u` pour débloquer")
             md.append("**Indices**\n" + "\n".join(hl))
         md.append("\n---\n")
         md.append("*Chargement…*" if loading else (store.clean_desc(c.get("description")) or "*(pas de description)*"))
@@ -561,7 +689,7 @@ class Flagship(App):
         except OSError as e:
             self._emit(f"Export PROGRESS KO : {e}", "error")
             return
-        self._emit(f"📄 PROGRESS.md écrit : {p}", "information", 5)
+        self._emit(f"📄 Progression exportée : {p}", "information", 5)
 
     # -- copier connexion / notes ---------------------------------------
     def action_copy_conn(self) -> None:
@@ -575,6 +703,23 @@ class Flagship(App):
             self.notify(f"Copié : {text}", timeout=4)
         except Exception:  # noqa: BLE001
             self.notify(f"À copier : {text}", timeout=6)
+
+    def action_open_folder(self) -> None:
+        """Ouvre le dossier du challenge dans le gestionnaire de fichiers du système."""
+        if not self.selected:
+            self.notify("Sélectionne d'abord un challenge.", severity="warning")
+            return
+        path = self.selected.get("path")
+        if not path or not Path(path).exists():
+            self.notify("Dossier absent : télécharge d'abord (touche d).", severity="warning")
+            return
+        opener = {"darwin": "open", "win32": "explorer"}.get(sys.platform, "xdg-open")
+        try:
+            subprocess.Popen([opener, path],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.notify(f"📂 Ouverture : {path}", timeout=3)
+        except Exception as e:  # noqa: BLE001
+            self.notify(f"Ouverture impossible ({e}) : {path}", severity="warning", timeout=6)
 
     def action_edit_notes(self) -> None:
         if not self.selected:
@@ -607,7 +752,12 @@ class Flagship(App):
         if not self.selected:
             self.notify("Sélectionne d'abord un challenge.", severity="warning")
             return
-        self.submit_worker(int(self.selected["id"]), flag, self.selected.get("path", ""))
+        cid = int(self.selected["id"])
+        if store.was_attempted(self.cfg.base_dir, cid, flag):
+            self._emit(f"⚠️ Flag déjà tenté (incorrect), non resoumis : {flag}", "warning", 6)
+            event.input.value = ""
+            return
+        self.submit_worker(cid, flag, self.selected.get("path", ""))
         event.input.value = ""
 
     @work(thread=True, exclusive=True, group="submit")
@@ -618,6 +768,7 @@ class Flagship(App):
             self.call_from_thread(self._emit, f"Soumission KO : {e}", "error")
             return
         if status == "correct":
+            store.record_attempt(self.cfg.base_dir, cid, flag, True, path)
             if self.cfg.write_flag_on_solve and path:
                 store.write_flag(path, flag)
             self.call_from_thread(self._after_solve, cid, message)
@@ -626,6 +777,7 @@ class Flagship(App):
         elif status == "already_solved":
             self.call_from_thread(self._emit, "Déjà résolu.", "information")
         else:
+            store.record_attempt(self.cfg.base_dir, cid, flag, False, path)
             self.call_from_thread(self._emit, f"✘ {status}: {message}".strip(), "warning", 5)
 
     def _after_solve(self, cid: int, message: str) -> None:

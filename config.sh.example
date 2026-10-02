@@ -1,8 +1,8 @@
-# Copie ce fichier en `config.sh` et remplis-le.
-# (ne verse jamais config.sh dans un dépôt : il contient ton token)
+# Copier ce fichier en `config.sh` et le remplir.
+# (ne jamais verser config.sh dans un dépôt : il contient le token)
 
 URL=https://ctf.example.com          # URL du CTFd
-CTFD_TOKEN=ctfd_xxxxxxxxxxxxxxxxxxx  # ton token (Settings > Access Tokens)
+CTFD_TOKEN=ctfd_xxxxxxxxxxxxxxxxxxx  # le token (Settings > Access Tokens)
 
 # --- optionnel ---
 CTF_NAME=MonCTF            # nom affiché + dossier par défaut
@@ -15,3 +15,5 @@ AUTO_UNLOCK_FREE_HINTS=false # débloquer automatiquement les indices à coût 0
 DOWNLOAD_WORKERS=6         # nb de téléchargements en parallèle pour « Tout synchroniser »
 THEME=textual-dark         # thème de départ (textual-dark, textual-light, nord, gruvbox,
                            #   dracula, tokyo-night, monokai, catppuccin-mocha… ; touche `t` pour cycler)
+# CTF_END=2026-10-05T18:00 # fin du CTF pour le compte à rebours (epoch ou ISO)
+                           #   laisser vide/commenté = détection auto via l'API (si autorisée)

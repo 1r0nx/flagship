@@ -1,58 +1,97 @@
-# 🚩 Flagship — Documentation (FR)
+# 🚩 Flagship (Documentation FR)
 
-Une **TUI** (interface terminal) pour n'importe quel CTF sous **CTFd**.
-Elle **synchronise** les challenges dans une arborescence de dossiers propre, et te laisse
-**parcourir, lire et soumettre les flags** sans quitter le terminal.
+Flagship est une interface en terminal (TUI) pour les CTF basés sur **CTFd**. L'outil synchronise
+les challenges dans une arborescence de dossiers organisée et permet de les parcourir, de lire les
+énoncés et de soumettre les flags sans quitter le terminal.
 
 ```
-┌ Flagship — MonCTF — score 8270 (#3) ── 12/40 résolus · 8 téléch. · tri : catégorie ┐
-│ Pwn (3/8)                │  # 2 - Return                              │
-│  ✔✓ 0 - Overflow 100·12✓ │  Catégorie : Pwn · Points : 200 · ○        │
-│  ○⬇ 2 - Return   200·5✓  │  🩸 First blood : team_x                    │
-│ Crypto (5/9)             │  Connexion : nc chal... 1389               │
-│  ✔✓ First XOR    50·30✓  │  --- Can you pwn this problem? ...          │
-│  ○⬇ RSA          150·5✓  ├────────────────────────────────────────────┤
-│                          │ 🚩 Flag (Entrée = soumettre)…              │
+┌ Flagship · MonCTF · score 8270 (#3) ·· 12/40 résolus · 8 téléch. · tri : catégorie ┐
+│ ▣ ▢ fichiers  ● ○ résolu │  # 2 - Return                              │
+│ Pwn (3/8)                │  Catégorie : Pwn · Points : 200 · ○        │
+│  ▣ ●  0 - Overflow 100·12 solves │  🩸 First blood : team_x            │
+│  ▣ ○  2 - Return   200·5 solves  │  Connexion : nc chal... 1389       │
+│ Crypto (5/9)             │  --- Can you pwn this problem? ...          │
+│  ▢ ●  First XOR    50·30 solves ├─────────────────────────────────────┤
+│  ▢ ○  RSA          150·5 solves │ 🚩                                   │
 └ d Télécharger  D Tout sync  / Rechercher  f Filtre  o Tri  q Quitter ──┘
 ```
-Marqueurs : `✔`/`○` résolu · `✓`/`⬇` téléchargé · `pt · N✓` points et nb de solves.
 
-## Ce que ça fait
+Les marqueurs de chaque ligne sont rappelés par une légende en haut de la colonne de gauche :
+`▣`/`▢` pour les fichiers téléchargés, `●`/`○` pour l'état résolu, et `N pt · N solves` pour les
+points et le nombre de solves. Deux formes distinctes (carré pour les fichiers, cercle pour le
+statut) et une couleur rendent l'état lisible d'un coup d'œil, avec un alignement constant quelle
+que soit la combinaison.
 
-1. **Configuration** — tu remplis un `config.sh` avec l'URL du CTF et ton token CTFd.
-2. **Listing léger (par défaut, AUCUN téléchargement massif)** — au lancement, Flagship
-   interroge l'API et **liste** les challenges dispo avec leur statut. Il ne crée **rien** sur
-   le disque tant que tu ne le demandes pas. La liste se rafraîchit **toute seule** (intervalle
-   configurable) : un nouveau challenge débloqué apparaît automatiquement (notification 🆕).
-3. **Téléchargement à la demande** — dans la TUI :
-   - **`d`** télécharge **le challenge sélectionné** → crée `<base>/CHALLENGES/<Catégorie>/<Nom>/`
-     avec `desc.txt` et `downloads.txt`, et les **fichiers rangés dans `work/`**. Les challenges
-     sont regroupés sous **`CHALLENGES/`** ; la racine du CTF ne garde que `config.sh`,
-     `PROGRESS.md`, `.flagship/` (état/journal).
-   - **`D`** = **« Tout synchroniser »** (avec confirmation) → télécharge **tous** les challenges.
-   C'est **idempotent** : rien n'est écrasé ni supprimé ; un fichier déjà présent n'est pas
-   re-téléchargé.
-4. **Versionnage des énoncés** — pour les challenges **déjà téléchargés**, si la **description**
-   ou les **indices** changent, l'ancien `desc.txt` **n'est pas écrasé** : une nouvelle version
-   `desc2.txt`, `desc3.txt`… est créée (avec date + ce qui a changé). Les **indices** sont suivis
-   (gratuits comme payants) : nouvel indice, indice débloqué, changement de coût.
-5. **TUI** — deux onglets :
-   - **Challenges** : navigation par catégorie ; par challenge : statut (✔/○), **état de
-     téléchargement** (✓/⬇), **points** et **nombre de solves** ; détail avec **first blood**,
-     connexion, fichiers, indices ; description consultable **sans** télécharger ; **recherche**
-     (`/`), **filtres** (`f` : tous/non résolus/résolus), **tri** (`o` : catégorie/points/solves) ;
-     **soumission** (`flag.txt` écrit si validé), **téléchargement / mise à jour** (`d`), **« Tout
-     synchroniser »** (`D`, parallèle + barre de progression), **déblocage d'indice** (`u`),
-     **copier la connexion** (`c`), **notes** (`e`, `notes.md`), **export `PROGRESS_flagship.md`** (`p`, n'écrase jamais ton PROGRESS.md).
-     L'en-tête affiche **ton score et ton rang**.
-   - **Scoreboard** : classement (position, équipe/joueur, score) ; **ta ligne est surlignée** et
-     le curseur s'y positionne.
-   - **Thèmes** : plusieurs thèmes de couleurs (clair/sombre : nord, gruvbox, dracula…), `t` pour
-     cycler, mémorisés. **Mode hors-ligne** : si l'API est injoignable, la dernière liste
-     synchronisée (cache) est affichée.
-6. **Notifications** — chaque changement (nouveau challenge dispo, description modifiée, indice
-   nouveau/débloqué, flag validé, téléchargement) déclenche un **toast** et est **journalisé**
-   (`.flagship/notifications.log`). Touche `n` pour revoir l'historique.
+## Fonctionnalités
+
+### Configuration par fichier
+
+Un fichier `config.sh` contient l'URL du CTF et le token CTFd. Aucune autre configuration n'est
+nécessaire pour démarrer.
+
+### Listing léger par défaut (aucun téléchargement massif)
+
+Au lancement, Flagship interroge l'API et liste les challenges disponibles avec leur statut. Rien
+n'est créé sur le disque tant qu'un téléchargement n'est pas demandé. La liste se rafraîchit
+automatiquement selon un intervalle configurable : un challenge nouvellement débloqué apparaît
+seul, accompagné d'une notification.
+
+### Téléchargement à la demande
+
+Depuis la TUI :
+
+- La touche `d` télécharge le challenge sélectionné. Elle crée
+  `<base>/CHALLENGES/<Catégorie>/<Nom>/` contenant `desc.txt` et `downloads.txt`, et place les
+  fichiers dans un sous-dossier `work/`. Les challenges sont regroupés sous `CHALLENGES/` ; la
+  racine du CTF ne conserve que `config.sh`, `PROGRESS.md` et `.flagship/` (état et journal).
+- La touche `D` déclenche « Tout synchroniser » (après confirmation) et télécharge l'ensemble des
+  challenges.
+
+L'opération est idempotente : rien n'est écrasé ni supprimé, et un fichier déjà présent n'est pas
+re-téléchargé.
+
+### Versionnage des énoncés
+
+Pour un challenge déjà téléchargé, si la description ou les indices changent, l'ancien `desc.txt`
+n'est pas écrasé : une nouvelle version `desc2.txt`, `desc3.txt`, etc. est créée, avec la date et
+la nature du changement. Les indices sont suivis, gratuits comme payants : ajout d'un indice,
+déblocage, ou modification de coût.
+
+### Interface à deux onglets
+
+Onglet **Challenges** : navigation par catégorie ; pour chaque challenge, affichage de l'état de
+téléchargement (`▣`/`▢`), du statut (`●`/`○`), des points et du nombre de solves. Le panneau de
+détail présente le first blood, la connexion, les **prérequis** (challenges à résoudre avant, avec
+leur état et un indicateur verrouillé/déverrouillé), les fichiers et les indices. La description est
+consultable sans téléchargement. L'interface offre une recherche (`/`), des filtres (`f` : tous,
+non résolus, résolus), un tri (`o` : catégorie, points, solves), la soumission de flag (avec
+écriture de `flag.txt` si le flag est correct), le téléchargement ou la mise à jour (`d`), la
+synchronisation complète (`D`, parallèle, avec barre de progression), le déblocage d'indice (`u`),
+la copie de la connexion (`c`), l'ouverture du dossier (`w`), l'édition des notes (`e`, `notes.md`)
+et l'export vers `PROGRESS_flagship.md` (`p`, sans jamais toucher au `PROGRESS.md` de l'utilisateur).
+L'en-tête affiche le score, le rang et un **compte à rebours** jusqu'à la fin du CTF.
+
+À la soumission, les flags **incorrects** déjà tentés sont mémorisés : resoumettre un flag identique
+est bloqué (avec un avertissement) afin de ne pas gaspiller de tentative. Chaque tentative est aussi
+journalisée dans `attempts.log` à la racine du dossier du challenge (utile pour un writeup).
+
+Onglet **Scoreboard** : classement avec position, équipe ou joueur, et score. La ligne de
+l'utilisateur est surlignée et le curseur s'y positionne.
+
+**Thèmes** : plusieurs thèmes de couleurs clairs et sombres (nord, gruvbox, dracula, etc.) ; la
+touche `t` fait défiler les thèmes, et le choix est mémorisé. En **mode hors-ligne**, si l'API est
+injoignable, la dernière liste synchronisée (cache) reste affichée.
+
+Dans les champs de saisie (recherche et flag), le curseur est affiché sous forme de barre verticale
+`▏` (style « I-beam ») plutôt que de bloc inversé. Comme Textual masque le curseur du terminal et
+dessine le sien dans une cellule, cette barre est une approximation ; en cas d'incompatibilité, le
+rendu revient automatiquement au curseur standard.
+
+### Notifications
+
+Chaque changement (nouveau challenge disponible, description modifiée, indice nouveau ou débloqué,
+flag validé, téléchargement) déclenche un toast et est journalisé dans
+`.flagship/notifications.log`. La touche `n` affiche l'historique.
 
 ## Installation
 
@@ -61,19 +100,22 @@ cd /workspace/flagship
 pip install -r requirements.txt     # textual + requests (+ gdown pour Google Drive)
 ```
 
-Ou, mieux, en **paquet installable** (crée la commande `flagship` disponible partout) :
+Installation recommandée en paquet, qui crée la commande `flagship` disponible partout :
+
 ```bash
 cd /workspace/flagship
-pip install -e .            # installe Flagship + dépendances -> commande `flagship`
-# ensuite, de n'importe où :  flagship chemin/config.sh
+pip install -e .            # installe Flagship et ses dépendances, puis la commande `flagship`
+# ensuite, depuis n'importe où :  flagship chemin/config.sh
 ```
-> ⚠️ Si tu **déplaces le dossier** après un `pip install -e .`, relance `pip install -e .` depuis
-> le nouvel emplacement (l'install *editable* pointe vers l'ancien chemin). `./flagship.sh` et
-> `python -m flagship`, eux, fonctionnent depuis n'importe où sans réinstaller.
+
+> Remarque : après un déplacement du dossier suivant un `pip install -e .`, relancer
+> `pip install -e .` depuis le nouvel emplacement, car l'installation *editable* pointe vers
+> l'ancien chemin. Les lanceurs `./flagship.sh` et `python -m flagship` fonctionnent depuis
+> n'importe où sans réinstallation.
 
 ## Configuration
 
-Copie l'exemple et édite-le :
+Copier l'exemple puis l'éditer :
 
 ```bash
 cp config.sh.example config.sh
@@ -85,21 +127,23 @@ URL=https://ctf.example.com          # URL du CTFd
 CTFD_TOKEN=ctfd_xxxxxxxxxxxxxxxxxxx  # token (CTFd > Settings > Access Tokens)
 
 # optionnel
-CTF_NAME=MonCTF            # nom affiché + dossier par défaut
+CTF_NAME=MonCTF            # nom affiché et dossier par défaut
 BASE_DIR=./MonCTF          # racine des dossiers générés (relatif au config.sh)
-POLL_INTERVAL=60           # synchro auto toutes les N s (0 = désactivée)
+POLL_INTERVAL=60           # synchro auto toutes les N secondes (0 = désactivée)
 WRITE_FLAG_ON_SOLVE=true   # écrire flag.txt quand un flag est validé
-WATCH_CHANGES=true         # suivre les changements desc/indices (desc2.txt...) ; false = + léger
+WATCH_CHANGES=true         # suivre les changements desc/indices (desc2.txt...) ; false = plus léger
 AUTO_UNLOCK_FREE_HINTS=false # débloquer automatiquement les indices gratuits (coût 0)
 DOWNLOAD_WORKERS=6         # téléchargements en parallèle pour « Tout synchroniser »
-THEME=textual-dark         # thème de départ (nord, gruvbox, dracula, tokyo-night… ; `t` pour cycler)
+THEME=textual-dark         # thème de départ (nord, gruvbox, dracula, tokyo-night ; `t` pour cycler)
+CTF_END=2026-10-05T18:00   # fin du CTF pour le compte à rebours (epoch ou ISO ; vide = auto via API)
 ```
 
-- Le **token n'est jamais affiché ni journalisé**. Le nom de la variable peut aussi être
-  `TOKEN` ou n'importe quel `*_TOKEN` (ex. `PWNY_CTFD_TOKEN`) — Flagship le détecte.
-- `config.sh` est ignoré par git (voir `.gitignore`) : ne le partage pas, il contient ton token.
+Le token n'est jamais affiché ni journalisé. Le nom de la variable peut aussi être `TOKEN` ou tout
+nom se terminant par `_TOKEN` (par exemple `PWNY_CTFD_TOKEN`), que Flagship détecte automatiquement.
+Le fichier `config.sh` est ignoré par git (voir `.gitignore`) : il ne doit pas être partagé, car il
+contient le token.
 
-## Lancement
+## Exécution
 
 ```bash
 ./flagship.sh                 # utilise ./config.sh
@@ -108,158 +152,175 @@ THEME=textual-dark         # thème de départ (nord, gruvbox, dracula, tokyo-ni
 python3 -m flagship [config.sh]
 ```
 
-Le launcher `flagship.sh` **résout le chemin du `config.sh` en absolu** puis se place dans le
-dossier de l'outil (pour que `python -m flagship` trouve le package) → tu peux le lancer depuis
+Le lanceur `flagship.sh` résout le chemin du `config.sh` en absolu, puis se place dans le dossier
+de l'outil pour que `python -m flagship` trouve le paquet. L'outil peut donc être lancé depuis
 n'importe où avec n'importe quel `config.sh`.
 
 ## Workflow multi-CTF (cloner une seule fois)
 
-Flagship est **l'outil** ; l'arborescence d'un CTF est séparée (c'est `BASE_DIR`). Pas besoin de
-re-cloner à chaque CTF.
+Flagship est l'outil ; l'arborescence d'un CTF est séparée (définie par `BASE_DIR`). Il n'est pas
+nécessaire de re-cloner le dépôt pour chaque CTF.
 
-**1. Une seule fois — installer l'outil :**
+**1. Une seule fois, installer l'outil :**
+
 ```bash
-git clone <ton-repo>/flagship ~/ctfs/flagship
+git clone <depot>/flagship ~/ctfs/flagship
 cd ~/ctfs/flagship
 pip install -r requirements.txt      # textual + requests + gdown
 ```
 
-**2. Pour chaque nouveau CTF (ex. HeroCTF) — un dossier + un config :**
+**2. Pour chaque nouveau CTF (par exemple HeroCTF), un dossier et un config :**
+
 ```bash
 mkdir ~/ctfs/HeroCTF
 cp ~/ctfs/flagship/config.sh.example ~/ctfs/HeroCTF/config.sh
-$EDITOR ~/ctfs/HeroCTF/config.sh     # -> URL, CTFD_TOKEN, BASE_DIR=.
+$EDITOR ~/ctfs/HeroCTF/config.sh     # renseigner URL, CTFD_TOKEN, BASE_DIR=.
 ```
+
 ```
 ~/ctfs/
-├── flagship/          ← cloné UNE fois (l'outil)
-└── HeroCTF/           ← créé par CTF ; l'arbre se génère ici
-    └── config.sh      ← URL + token + BASE_DIR=.
+├── flagship/          # cloné une seule fois (l'outil)
+└── HeroCTF/           # créé par CTF ; l'arborescence est générée ici
+    └── config.sh      # URL + token + BASE_DIR=.
 ```
-> `BASE_DIR` est résolu **par rapport au dossier du `config.sh`**. `BASE_DIR=.` → les challenges
+
+> `BASE_DIR` est résolu par rapport au dossier du `config.sh`. Avec `BASE_DIR=.`, les challenges
 > apparaissent dans `HeroCTF/<Catégorie>/<Challenge>/`.
 
-**3. Démarrer (depuis n'importe où) :**
+**3. Démarrer, depuis n'importe où :**
+
 ```bash
 ~/ctfs/flagship/flagship.sh ~/ctfs/HeroCTF/config.sh
 # équivalent :
 cd ~/ctfs/flagship && python3 -m flagship ~/ctfs/HeroCTF/config.sh
 ```
 
-**Astuce — un alias pour ne plus retaper le chemin** (dans `~/.zshrc` / `~/.bashrc`) :
+Un alias évite de retaper le chemin (dans `~/.zshrc` ou `~/.bashrc`) :
+
 ```bash
 alias flagship='~/ctfs/flagship/flagship.sh'
 # puis :  flagship ~/ctfs/HeroCTF/config.sh
 ```
 
-**Variante** : cloner Flagship *dans* le dossier du CTF (`HeroCTF/flagship/`) fonctionne aussi —
-mets alors `BASE_DIR=..` dans son `config.sh` pour générer l'arbre dans `HeroCTF/`. Mais tu clones
-l'outil à chaque fois (moins pratique).
+Variante : cloner Flagship à l'intérieur du dossier du CTF (`HeroCTF/flagship/`) fonctionne
+également ; il faut alors renseigner `BASE_DIR=..` dans son `config.sh` pour générer l'arborescence
+dans `HeroCTF/`. Cette variante impose de re-cloner l'outil à chaque fois, ce qui est moins pratique.
 
-> Sécurité : `config.sh` (avec ton token) est **git-ignoré**. Sur une nouvelle machine, recrée-le
-> à partir de `config.sh.example`.
+Le fichier `config.sh`, qui contient le token, est ignoré par git. Sur une nouvelle machine, il
+doit être recréé à partir de `config.sh.example`.
 
-### Raccourcis clavier
+## Raccourcis clavier
 
 | Touche | Action |
 |--------|--------|
-| `↑`/`↓`, Entrée | naviguer / ouvrir un challenge (affiche l'énoncé, sans télécharger) |
-| clic sur les onglets | basculer Challenges ↔ Scoreboard |
-| `d` | **télécharger / mettre à jour** le sélectionné (recrée `desc.txt` si manquant, complète les fichiers manquants dans `work/`) |
-| `D` | **Tout synchroniser** (parallèle + barre de progression, confirmation) |
+| `↑`/`↓`, Entrée | naviguer et ouvrir un challenge (affiche l'énoncé, sans télécharger) |
+| clic sur les onglets | basculer entre Challenges et Scoreboard |
+| `d` | télécharger ou mettre à jour le challenge sélectionné (recrée `desc.txt` si manquant, complète les fichiers manquants dans `work/`) |
+| `D` | tout synchroniser (parallèle, barre de progression, confirmation) |
 | `/` | aller à la barre de recherche |
-| `r` | actualiser la liste maintenant (+ scoreboard + rang) |
-| `f` | changer de filtre (tous → non résolus → résolus) |
-| `o` | changer le tri (catégorie → points → solves) |
+| `r` | actualiser la liste immédiatement (plus scoreboard et rang) |
+| `f` | changer de filtre (tous, non résolus, résolus) |
+| `o` | changer le tri (catégorie, points, solves) |
 | `t` | changer de thème de couleurs (cycle, persisté) |
 | `s` | aller au champ de soumission du flag |
 | `u` | débloquer un indice (confirmation) |
-| `c` | copier la connexion (`nc …`/URL) du challenge |
-| `e` | éditer les **notes** du challenge (`notes.md`, éditeur `$EDITOR`) |
-| `p` | exporter un récap dans **`PROGRESS_flagship.md`** (ne touche pas à ton `PROGRESS.md`) |
+| `c` | copier la connexion du challenge (`nc …` ou URL) |
+| `w` | ouvrir le dossier du challenge dans le gestionnaire de fichiers |
+| `e` | éditer les notes du challenge (`notes.md`, via `$EDITOR`) |
+| `p` | exporter un récapitulatif dans `PROGRESS_flagship.md` (sans toucher à `PROGRESS.md`) |
 | `n` | afficher l'historique des notifications |
-| `Échap` | quitter un champ de saisie (recherche/flag) → focus sur la liste |
-| `Tab` / `Maj+Tab` | passer d'un élément à l'autre (focus suivant/précédent) |
+| `Échap` | quitter un champ de saisie (recherche ou flag) et revenir sur la liste |
+| `Tab` / `Maj+Tab` | déplacer le focus vers l'élément suivant ou précédent |
 | `q` | quitter |
 
-- **Soumettre** : sélectionne un challenge, `s`, tape le flag, **Entrée** → `✔ Correct` / `✘`.
-- **Rechercher** : `/`, tape une partie du nom (l'arbre se filtre en direct).
-- **Débloquer un indice** : `u` → confirme (le moins cher est proposé). ⚠️ un indice payant
-  réduit ton score, d'où la confirmation.
+Pour soumettre un flag : sélectionner un challenge, appuyer sur `s`, saisir le flag, puis `Entrée`.
+Pour rechercher : appuyer sur `/` et saisir une partie du nom (l'arbre se filtre en direct). Pour
+débloquer un indice : appuyer sur `u` puis confirmer (le moins cher est proposé). Un indice payant
+réduit le score, d'où la confirmation.
 
-## Comment ça marche (architecture)
+## Architecture
 
 ```
 flagship/
 ├── config.py   # lit config.sh (CLE=valeur), sans exécuter de shell
 ├── ctfd.py     # client API CTFd : challenges, détail, solves, submit, unlock, download
 ├── store.py    # arborescence + desc.txt + flag.txt + slugify + téléchargements
-├── app.py      # la TUI Textual (onglets, détail, soumission, poll auto, notifs)
+├── app.py      # la TUI Textual (onglets, détail, soumission, poll auto, notifications)
 └── __main__.py # point d'entrée (python -m flagship)
 ```
 
-- **`config.py`** parse `config.sh` ligne par ligne (`export`/guillemets/commentaires tolérés).
-  Aucun `source` shell n'est exécuté → pas d'effet de bord.
-- **`ctfd.py`** encapsule l'API :
-  - `GET /api/v1/challenges` (liste), `GET /api/v1/challenges/<id>` (détail),
-  - `GET /api/v1/users/me/solves` (résolus), `GET /api/v1/scoreboard` (classement),
-  - `POST /api/v1/challenges/attempt` (soumission), `POST /api/v1/unlocks` (déblocage d'indice),
-  - téléchargement des fichiers listés. Les erreurs (CTF fermé, réseau…) remontent proprement
-    et s'affichent dans la TUI sans planter.
-- **`store.py`** :
-  - `slugify()` applique le nommage : espaces → `-`, **jamais de tirets consécutifs**
-    (`0 - Overflow` → `0-Overflow`, `Bruh 0: Exif` → `Bruh-0:-Exif`), `/` et `\` → `-`.
-  - `list_state()` (défaut) liste les challenges + statut + **état de téléchargement**, sans rien
-    créer ; `download_one()` télécharge un challenge ; `sync()` (« Tout synchroniser ») télécharge
-    tout. Elles renvoient les **événements** (desc/indices modifiés sur les challenges suivis).
-  - **Versionnage** : un état caché `.flagship.json` par challenge mémorise les empreintes
-    (SHA-256) de la description et des indices. Si ça change → `descN.txt` (jamais d'écrasement).
-    Quand `WATCH_CHANGES=false`, le détail n'est récupéré que pour les nouveaux challenges
-    (synchro plus légère, mais pas de détection de changement).
-  - `write_flag()` écrit `flag.txt` (jamais par-dessus un existant).
-- **Notifications** : les toasts sont aussi écrits dans `<base>/.flagship/notifications.log`
-  (historique consultable avec `n`).
-- **État d'interface persistant** : le filtre, le tri, les **catégories pliées/dépliées** et la
-  dernière sélection sont mémorisés dans `<base>/.flagship/state.json` → conservés aux rebuilds
-  (download/refresh) **et** restaurés à la réouverture de la TUI.
-- **`app.py`** (Textual) :
-  - Les appels réseau (bloquants) tournent dans des **workers threadés** (`@work(thread=True)`) ;
-    l'UI est mise à jour via `call_from_thread` → l'interface ne gèle jamais.
-  - `on_mount` lance une première synchro puis programme le **poll** (`set_interval`).
-  - Le **détail** d'un challenge est chargé à la sélection et **mis en cache**.
+`config.py` analyse `config.sh` ligne par ligne, en tolérant `export`, les guillemets et les
+commentaires. Aucun `source` shell n'est exécuté, ce qui évite tout effet de bord.
+
+`ctfd.py` encapsule l'API :
+
+- `GET /api/v1/challenges` (liste) et `GET /api/v1/challenges/<id>` (détail) ;
+- `GET /api/v1/users/me/solves` (résolus) et `GET /api/v1/scoreboard` (classement) ;
+- `POST /api/v1/challenges/attempt` (soumission) et `POST /api/v1/unlocks` (déblocage d'indice) ;
+- téléchargement des fichiers listés.
+
+Les erreurs (CTF fermé, réseau indisponible, etc.) remontent proprement et s'affichent dans la TUI
+sans interrompre l'application.
+
+`store.py` :
+
+- `slugify()` applique le nommage : espaces remplacés par `-`, jamais de tirets consécutifs
+  (`0 - Overflow` devient `0-Overflow`, `Bruh 0: Exif` devient `Bruh-0:-Exif`), `/` et `\`
+  remplacés par `-`.
+- `list_state()` (comportement par défaut) liste les challenges avec leur statut et leur état de
+  téléchargement, sans rien créer ; `download_one()` télécharge un challenge ; `sync()`
+  (« Tout synchroniser ») télécharge l'ensemble. Ces fonctions renvoient les événements
+  (descriptions et indices modifiés sur les challenges suivis).
+- Versionnage : un état caché `.flagship.json` par challenge mémorise les empreintes SHA-256 de la
+  description et des indices. En cas de changement, un `descN.txt` est créé, sans écrasement. Avec
+  `WATCH_CHANGES=false`, le détail n'est récupéré que pour les nouveaux challenges, ce qui allège
+  la synchronisation mais supprime la détection de changement.
+- `write_flag()` écrit `flag.txt`, jamais par-dessus un fichier existant.
+
+Les toasts de notification sont aussi écrits dans `<base>/.flagship/notifications.log`, consultable
+avec `n`. L'état d'interface (filtre, tri, catégories pliées ou dépliées, dernière sélection) est
+conservé dans `<base>/.flagship/state.json`, puis restauré aux reconstructions de l'arbre
+(téléchargement, rafraîchissement) et à la réouverture de la TUI.
+
+`app.py` (Textual) :
+
+- Les appels réseau bloquants s'exécutent dans des workers threadés (`@work(thread=True)`), et
+  l'interface est mise à jour via `call_from_thread`, de sorte qu'elle ne gèle jamais.
+- `on_mount` lance une première synchronisation puis programme le poll (`set_interval`).
+- Le détail d'un challenge est chargé à la sélection, puis mis en cache.
 
 ## Téléchargements
 
-Les téléchargements n'ont lieu **qu'à la demande** (`d` sur un challenge, ou `D` pour tout).
-Quand un challenge est téléchargé, Flagship range ses fichiers dans **`work/`** et écrit un rapport
-`downloads.txt` (`ok` / `manual` / `error`) à la racine du challenge. Dans **tous** les cas, les
-**liens** sont présents dans `desc.txt` (section *Fichiers (plateforme)* avec URL complète, et
-*Liens externes*).
+Les téléchargements n'ont lieu qu'à la demande (`d` sur un challenge, ou `D` pour tout). Lorsqu'un
+challenge est téléchargé, Flagship range ses fichiers dans `work/` et écrit un rapport
+`downloads.txt` (valeurs `ok`, `skip`, `manual`, `error`) à la racine du challenge. Dans tous les
+cas, les liens figurent dans `desc.txt` (section « Fichiers (plateforme) » avec l'URL complète, et
+section « Liens externes »).
 
 | Source | Comportement |
 |--------|--------------|
-| Fichier hébergé par le CTFd | téléchargé (authentifié), garde-fou **2 Go** |
-| Lien **http(s)** direct | téléchargé **sans** envoyer ton token, garde-fou 2 Go |
-| **Dropbox** | réécrit en lien direct (`?dl=1`) puis téléchargé |
-| **Google Drive** (fichier) | via `gdown` si public ; sinon → `manual` (lien conservé) |
-| **Google Drive** (dossier) | via `gdown.download_folder` |
-| **MEGA** | via `megatools`/`megadl` **si installé** ; sinon → `manual` (lien conservé) |
-| Fichier **> 2 Go** | non téléchargé → `manual` (à toi de le récupérer) |
+| Fichier hébergé par le CTFd | téléchargé (authentifié), garde-fou 2 Go |
+| Lien http(s) direct | téléchargé sans envoi du token, garde-fou 2 Go |
+| Dropbox | réécrit en lien direct (`?dl=1`) puis téléchargé |
+| Google Drive (fichier) | via `gdown` si public ; sinon marqué `manual` (lien conservé) |
+| Google Drive (dossier) | via `gdown.download_folder` |
+| MEGA | via `megatools`/`megadl` si installé ; sinon marqué `manual` (lien conservé) |
+| Fichier supérieur à 2 Go | non téléchargé, marqué `manual` (récupération manuelle) |
 
-- **« Tout synchroniser »** (`D`) télécharge **en parallèle** (`DOWNLOAD_WORKERS`) avec une
-  **barre de progression**.
-- **`d` est auto-réparateur** : il **recrée `desc.txt`** s'il manque (dossier vidé p. ex.) et
-  **complète les fichiers manquants/en échec** dans `work/` (idempotent — les fichiers déjà là
-  sont sautés). Pas de `work/`/`downloads.txt` sans `desc.txt`.
-- Ton **token CTFd n'est jamais envoyé à un hôte tiers** (Drive, MEGA…). Le garde-fou Drive est
-  vérifié *a posteriori* (gdown ne connaît pas la taille à l'avance).
+« Tout synchroniser » (`D`) télécharge en parallèle (`DOWNLOAD_WORKERS`), avec une barre de
+progression. La touche `d` est auto-réparatrice : elle recrée `desc.txt` s'il manque (par exemple
+après un dossier vidé) et complète les fichiers manquants ou en échec dans `work/`, de manière
+idempotente (les fichiers déjà présents sont sautés). Un `work/` ou un `downloads.txt` ne sont
+jamais créés sans `desc.txt`. Le token CTFd n'est jamais envoyé à un hôte tiers (Drive, MEGA, etc.).
+Le garde-fou Drive est vérifié a posteriori, car `gdown` ne connaît pas la taille à l'avance.
 
-## Notes / limites
+## Notes et limites
 
-- Le **statut résolu** vient de l'API (`/users/me/solves`) et, à défaut, de la présence d'un
+- Le statut résolu provient de l'API (`/users/me/solves`) et, à défaut, de la présence d'un
   `flag.txt` local.
-- Les **indices** sont affichés (coût + verrouillé/débloqué). Le déblocage se fait **à la
-  demande** (touche `u`) avec **confirmation** — jamais automatiquement, car ça coûte des points.
-- Si le CTF est **terminé/fermé**, l'API renvoie un message d'erreur : Flagship l'affiche et
-  garde l'arborescence déjà synchronisée.
-- Pensé pour CTFd (self-hosted ou sigpwny-like). D'autres plateformes ne sont pas gérées.
+- Les indices sont affichés avec leur coût et leur état (verrouillé ou débloqué). Le déblocage se
+  fait à la demande (touche `u`) avec confirmation, jamais automatiquement, car il coûte des points.
+- Si le CTF est terminé ou fermé, l'API renvoie un message d'erreur : Flagship l'affiche et
+  conserve l'arborescence déjà synchronisée.
+- L'outil est conçu pour CTFd (auto-hébergé ou de type sigpwny). Les autres plateformes ne sont pas
+  prises en charge.
