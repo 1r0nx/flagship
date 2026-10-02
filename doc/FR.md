@@ -145,8 +145,10 @@ flagship/
 `POST /unlocks` (indices). Les erreurs s'affichent dans la TUI, elles ne la font jamais
 planter.
 
-`store.py` : `slugify()` transforme un nom en nom de dossier (espaces en `-`, jamais de
-doublons). `list_state()` liste seulement ; `download_one()`, `download_subset()`, `sync()`
+`store.py` : `slugify()` transforme un nom en nom de dossier. Espaces en `-`, jamais de
+tirets doublés, et les caractères spéciaux du shell (`` ' " ` $ ! ; & | ( ) < > { } [ ] * ? ~ # = % ``)
+sont supprimés plutôt que remplacés, donc `"Anakin's PC"` devient `Anakins-PC`, pas `Anakin's-PC`.
+`list_state()` liste seulement ; `download_one()`, `download_subset()`, `sync()`
 téléchargent. Un `.flagship.json` caché par challenge garde la trace des changements, donc
 `descN.txt` n'est écrit que si quelque chose a vraiment changé. Les flags incorrects sont
 mémorisés dans `.flagship/attempts.json` pour ne jamais être renvoyés.

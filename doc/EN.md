@@ -142,7 +142,9 @@ flagship/
 `/challenges/<id>/solves` (first blood), `POST /challenges/attempt` (submit),
 `POST /unlocks` (hints). Errors show up in the TUI, they never crash it.
 
-`store.py`: `slugify()` turns a name into a folder name (spaces to `-`, no doubles).
+`store.py`: `slugify()` turns a name into a folder name. Spaces become `-`, no doubled dashes,
+and shell-special characters (`` ' " ` $ ! ; & | ( ) < > { } [ ] * ? ~ # = % ``) are dropped
+outright rather than replaced, so `"Anakin's PC"` becomes `Anakins-PC`, not `Anakin's-PC`.
 `list_state()` just lists; `download_one()`, `download_subset()`, `sync()` download.
 A hidden `.flagship.json` per challenge tracks whether desc/hints changed, so `descN.txt`
 only gets written when something actually did. Incorrect flags are remembered in

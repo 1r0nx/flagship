@@ -30,6 +30,10 @@ MAX_BYTES = 2 * 1024**3  # 2 GB: beyond that -> manual
 CHALLENGES = "CHALLENGES"  # subfolder holding the categories (root reserved for config.sh, etc.)
 
 _FORBIDDEN = re.compile(r'[/\\\x00]')
+# shell metacharacters that need quoting/escaping to use literally on a command line (space is
+# handled separately, by _SPACES) ; dropped outright rather than turned into a dash, so
+# "Anakin's PC" -> "Anakins-PC", not "Anakin's-PC"
+_SHELL_SPECIAL = re.compile(r"""['"`$!;&|()<>{}\[\]*?~#=%^]""")
 _SPACES = re.compile(r"\s+")
 _DASHES = re.compile(r"-{2,}")
 _URL_RE = re.compile(r'https?://[^\s<>"\')\]]+')
@@ -38,6 +42,7 @@ _URL_RE = re.compile(r'https?://[^\s<>"\')\]]+')
 # ------------------------------------------------------------------ naming
 def slugify(name: str) -> str:
     s = _FORBIDDEN.sub("-", name.strip())
+    s = _SHELL_SPECIAL.sub("", s)
     s = _SPACES.sub("-", s)
     s = _DASHES.sub("-", s)
     s = s.strip("-")

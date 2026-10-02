@@ -259,6 +259,9 @@ class MemberStatsScreen(ModalScreen[None]):
 class Flagship(App):
     CSS = """
     Header HeaderIcon { display: none; }  /* drop the "⭘" command-palette icon, top-left */
+    /* clicking the header normally toggles it to 3 rows (Textual's HeaderTitle.-tall) ;
+       pin it to 1 row always, so a stray click never opens a gap above the tabs */
+    Header.-tall { height: 1; }
     /* the screen itself must never scroll: every pane that needs it (tree, detail, stats,
        notifications) already has its own scrollbar, so a 1-row layout mismatch must never
        spawn a second, screen-wide scrollbar next to a pane's real one */
@@ -326,7 +329,7 @@ class Flagship(App):
 
     # -- layout ----------------------------------------------------------
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        yield Header(show_clock=False)
         with TabbedContent(initial="tab-chal"):
             with TabPane("Challenges", id="tab-chal"):
                 with Horizontal():
