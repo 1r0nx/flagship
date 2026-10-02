@@ -252,7 +252,11 @@ def download_external(url: str, dest_dir: Path, max_bytes: int = MAX_BYTES) -> t
     if size and size > max_bytes:
         r.close()
         return "manual", f"{size/1024**3:.1f} Go > 2 Go (manuel)"
-    return _stream_to(r, dest_dir / _filename_from(r, url), max_bytes)
+    dest = dest_dir / _filename_from(r, url)
+    if dest.exists():  # ne jamais écraser un fichier déjà présent
+        r.close()
+        return "skip", f"{dest.name} (déjà présent)"
+    return _stream_to(r, dest, max_bytes)
 
 
 def _do_downloads(client, d: Path, detail, file_urls, ext_links) -> list[str]:
@@ -273,7 +277,8 @@ def _do_downloads(client, d: Path, detail, file_urls, ext_links) -> list[str]:
     if report:
         (d / "downloads.txt").write_text(
             "# Rapport de téléchargement Flagship (fichiers -> work/)\n"
-            "# ok = téléchargé · manual = à faire soi-même (lien dans desc.txt) · error\n\n"
+            "# ok = téléchargé · skip = déjà présent (non réécrasé) · "
+            "manual = à faire soi-même (lien dans desc.txt) · error\n\n"
             + "\n".join(report) + "\n", encoding="utf-8")
     return report
 
