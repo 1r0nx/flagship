@@ -1,2 +1,2 @@
-"""Flagship : TUI CTFd (sync + parcours + soumission)."""
+"""Flagship: CTFd TUI (sync + browsing + submission)."""
 __version__ = "0.1.0"

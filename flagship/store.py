@@ -1,12 +1,12 @@
-"""Synchronisation API -> système de fichiers.
+"""API -> filesystem synchronisation.
 
-Conventions :
-- arborescence : <base_dir>/CHALLENGES/<Catégorie>/<Nom-du-challenge>/
-  (la racine <base_dir> reste réservée à config.sh, PROGRESS.md, .flagship/…)
-- nommage : espaces -> '-', jamais de tirets consécutifs ; en cas de collision de noms dans
-  une même catégorie, on suffixe par l'id du challenge.
-- fichiers téléchargés rangés dans <challenge>/work/ ; desc.txt/downloads.txt à la racine.
-- idempotent : ne supprime/écrase jamais un desc.txt existant ; changements desc/indices -> descN.txt.
+Conventions:
+- tree: <base_dir>/CHALLENGES/<Category>/<Challenge-name>/
+  (the <base_dir> root stays reserved for config.sh, PROGRESS.md, .flagship/…)
+- naming: spaces -> '-', never consecutive dashes; on a name collision within the same
+  category, the challenge id is appended as a suffix.
+- downloaded files go in <challenge>/work/; desc.txt/downloads.txt at the challenge root.
+- idempotent: never deletes/overwrites an existing desc.txt; desc/hint changes -> descN.txt.
 """
 
 from __future__ import annotations
@@ -26,8 +26,8 @@ import requests
 
 from .ctfd import CTFd, CTFdError, _stream_to
 
-MAX_BYTES = 2 * 1024**3  # 2 Go : au-delà -> manuel
-CHALLENGES = "CHALLENGES"  # sous-dossier qui contient les catégories (racine réservée à config.sh, etc.)
+MAX_BYTES = 2 * 1024**3  # 2 GB: beyond that -> manual
+CHALLENGES = "CHALLENGES"  # subfolder holding the categories (root reserved for config.sh, etc.)
 
 _FORBIDDEN = re.compile(r'[/\\\x00]')
 _SPACES = re.compile(r"\s+")
@@ -35,7 +35,7 @@ _DASHES = re.compile(r"-{2,}")
 _URL_RE = re.compile(r'https?://[^\s<>"\')\]]+')
 
 
-# ------------------------------------------------------------------ nommage
+# ------------------------------------------------------------------ naming
 def slugify(name: str) -> str:
     s = _FORBIDDEN.sub("-", name.strip())
     s = _SPACES.sub("-", s)
@@ -52,7 +52,7 @@ def challenge_dir(base_dir: Path, category: str, name: str) -> Path:
 
 
 def assign_paths(challenges: list[dict], base_dir: Path) -> None:
-    """Fixe `ch['path']` pour chaque challenge, avec anti-collision (suffixe -id)."""
+    """Set `ch['path']` for each challenge, with collision avoidance (-id suffix)."""
     root = base_dir / CHALLENGES
     buckets: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for ch in challenges:
@@ -61,7 +61,7 @@ def assign_paths(challenges: list[dict], base_dir: Path) -> None:
     for (cat, name), group in buckets.items():
         if len(group) == 1:
             group[0]["path"] = str(root / cat / name)
-        else:  # collision -> suffixe id
+        else:  # collision -> id suffix
             for ch in group:
                 ch["path"] = str(root / cat / f"{name}-{ch.get('id')}")
 
@@ -110,32 +110,32 @@ def _hints_state(detail: dict) -> list[dict]:
 def _hints_lines(detail: dict) -> str:
     hints = detail.get("hints") or []
     if not hints:
-        return "aucun"
+        return "none"
     parts = []
     for h in hints:
         cost = h.get("cost", 0)
-        tag = "gratuit" if cost == 0 else f"{cost} pts"
+        tag = "free" if cost == 0 else f"{cost} pts"
         if h.get("content"):
-            parts.append(f'[{h.get("id")}] (débloqué, {tag}) "{h["content"]}"')
+            parts.append(f'[{h.get("id")}] (unlocked, {tag}) "{h["content"]}"')
         else:
-            parts.append(f'[{h.get("id")}] (verrouillé, {tag})')
+            parts.append(f'[{h.get("id")}] (locked, {tag})')
     return "\n            ".join(parts)
 
 
 def _files_block(file_urls: list[tuple[str, str]]) -> str:
     if not file_urls:
-        return "aucun"
+        return "none"
     return "\n" + "\n".join(f"            - work/{n} : {u}" for n, u in file_urls)
 
 
 def _ext_block(ext_links: list[str]) -> str:
     if not ext_links:
-        return "aucun"
+        return "none"
     return "\n" + "\n".join(f"            - [{classify_link(u)}] {u}" for u in ext_links)
 
 
 def prereq_ids(detail: dict) -> list:
-    """Ids des challenges prérequis (CTFd `requirements`), quel que soit le format."""
+    """Ids of prerequisite challenges (CTFd `requirements`), whatever the format."""
     req = detail.get("requirements")
     if isinstance(req, dict):
         return list(req.get("prerequisites") or [])
@@ -146,24 +146,24 @@ def prereq_ids(detail: dict) -> list:
 
 def _desc_text(detail: dict, file_urls, ext_links, header: str = "") -> str:
     pr = prereq_ids(detail)
-    prereq = ", ".join(str(i) for i in pr) if pr else "aucun"
+    prereq = ", ".join(str(i) for i in pr) if pr else "none"
     body = (
-        f"Nom        : {detail.get('name','?')}\n"
-        f"Catégorie  : {detail.get('category','?')}\n"
+        f"Name       : {detail.get('name','?')}\n"
+        f"Category   : {detail.get('category','?')}\n"
         f"Points     : {detail.get('value','?')}\n"
         f"Solves     : {detail.get('solves','?')}\n"
         f"ID         : {detail.get('id','?')}\n\n"
-        f"Description :\n{clean_desc(detail.get('description'))}\n\n"
-        f"Connexion : {detail.get('connection_info') or 'aucune'}\n"
-        f"Prérequis (ids) : {prereq}\n"
-        f"Fichiers (plateforme, -> work/) : {_files_block(file_urls)}\n"
-        f"Liens externes : {_ext_block(ext_links)}\n"
-        f"Indices   : {_hints_lines(detail)}\n"
+        f"Description:\n{clean_desc(detail.get('description'))}\n\n"
+        f"Connection: {detail.get('connection_info') or 'none'}\n"
+        f"Prerequisites (ids): {prereq}\n"
+        f"Files (platform, -> work/): {_files_block(file_urls)}\n"
+        f"External links: {_ext_block(ext_links)}\n"
+        f"Hints      : {_hints_lines(detail)}\n"
     )
     return (header + body) if header else body
 
 
-# ------------------------------------------------------------------ état
+# ------------------------------------------------------------------ state
 def _state_path(d: Path) -> Path:
     return d / ".flagship.json"
 
@@ -187,15 +187,15 @@ def _hint_events(old, new, name):
     old_by = {h["id"]: h for h in old}
     for nh in new:
         oid = nh["id"]
-        tag = "gratuit" if nh["cost"] == 0 else f"{nh['cost']} pts"
+        tag = "free" if nh["cost"] == 0 else f"{nh['cost']} pts"
         if oid not in old_by:
-            ev.append({"kind": "hint", "name": name, "msg": f"nouvel indice #{oid} ({tag})"})
+            ev.append({"kind": "hint", "name": name, "msg": f"new hint #{oid} ({tag})"})
         else:
             o = old_by[oid]
             if not o["unlocked"] and nh["unlocked"]:
-                ev.append({"kind": "hint", "name": name, "msg": f"indice #{oid} débloqué"})
+                ev.append({"kind": "hint", "name": name, "msg": f"hint #{oid} unlocked"})
             elif o["cost"] != nh["cost"]:
-                ev.append({"kind": "hint", "name": name, "msg": f"indice #{oid} : coût {o['cost']}→{nh['cost']}"})
+                ev.append({"kind": "hint", "name": name, "msg": f"hint #{oid}: cost {o['cost']}→{nh['cost']}"})
     return ev
 
 
@@ -218,44 +218,44 @@ def _dropbox_direct(url: str) -> str:
 
 
 def download_external(url: str, dest_dir: Path, max_bytes: int = MAX_BYTES) -> tuple[str, str]:
-    """Télécharge un lien externe (JAMAIS d'auth CTFd). (statut, détail)."""
+    """Download an external link (NEVER with CTFd auth). (status, detail)."""
     kind = classify_link(url)
     if kind == "gdrive":
         try:
             import gdown
             if "/folders/" in url:
                 outs = gdown.download_folder(url=url, output=str(dest_dir), quiet=True, use_cookies=False)
-                return ("ok", f"{len(outs)} fichier(s)") if outs else ("manual", "Drive (dossier) : échec (manuel)")
+                return ("ok", f"{len(outs)} file(s)") if outs else ("manual", "Drive (folder): failed (manual)")
             m = re.search(r'/d/([\w-]+)', url) or re.search(r'[?&]id=([\w-]+)', url)
             fid = m.group(1) if m else None
             out = (gdown.download(id=fid, output=str(dest_dir) + "/", quiet=True)
                    if fid else gdown.download(url=url, output=str(dest_dir) + "/", quiet=True))
             if not out:
-                return "manual", "Google Drive : échec (manuel)"
+                return "manual", "Google Drive: failed (manual)"
             try:
                 if Path(out).stat().st_size > max_bytes:
                     Path(out).unlink(missing_ok=True)
-                    return "manual", "> 2 Go (manuel)"
+                    return "manual", "> 2 GB (manual)"
             except OSError:
                 pass
             return "ok", out
         except Exception as e:  # noqa: BLE001
-            msg = "lien privé ou accès refusé" if "Cannot retrieve" in str(e) else str(e).splitlines()[0]
-            return "manual", f"Google Drive : {msg} (manuel)"
+            msg = "private link or access denied" if "Cannot retrieve" in str(e) else str(e).splitlines()[0]
+            return "manual", f"Google Drive: {msg} (manual)"
     if kind == "mega":
         tool = shutil.which("megadl") or shutil.which("megatools")
         if not tool:
-            return "manual", "MEGA : pas d'outil megatools, récupération manuelle"
+            return "manual", "MEGA: megatools not installed, manual retrieval"
         try:
             cmd = ([tool, "--path", str(dest_dir), url] if tool.endswith("megadl")
                    else [tool, "dl", "--path", str(dest_dir), url])
             subprocess.run(cmd, check=True, timeout=600, capture_output=True)
             return "ok", "MEGA"
         except Exception as e:  # noqa: BLE001
-            return "manual", f"MEGA : {e} (manuel)"
+            return "manual", f"MEGA: {e} (manual)"
     if kind == "dropbox":
         url = _dropbox_direct(url)
-    # http / dropbox direct : requête SANS auth
+    # direct http / dropbox: request WITHOUT auth
     try:
         r = requests.get(url, stream=True, timeout=60, allow_redirects=True)
         r.raise_for_status()
@@ -264,11 +264,11 @@ def download_external(url: str, dest_dir: Path, max_bytes: int = MAX_BYTES) -> t
     size = int(r.headers.get("Content-Length") or 0)
     if size and size > max_bytes:
         r.close()
-        return "manual", f"{size/1024**3:.1f} Go > 2 Go (manuel)"
+        return "manual", f"{size/1024**3:.1f} GB > 2 GB (manual)"
     dest = dest_dir / _filename_from(r, url)
-    if dest.exists():  # ne jamais écraser un fichier déjà présent
+    if dest.exists():  # never overwrite an already-present file
         r.close()
-        return "skip", f"{dest.name} (déjà présent)"
+        return "skip", f"{dest.name} (already present)"
     return _stream_to(r, dest, max_bytes)
 
 
@@ -280,7 +280,7 @@ def _do_downloads(client, d: Path, detail, file_urls, ext_links) -> list[str]:
         base = Path(f.split("?")[0]).name
         dest = work / base
         if dest.exists():
-            report.append(f"[skip] work/{base} (déjà présent)")
+            report.append(f"[skip] work/{base} (already present)")
             continue
         status, info = client.download(f, dest)
         report.append(f"[{status}] work/{base} : {info}")
@@ -289,16 +289,16 @@ def _do_downloads(client, d: Path, detail, file_urls, ext_links) -> list[str]:
         report.append(f"[{status}] {u} : {info}")
     if report:
         (d / "downloads.txt").write_text(
-            "# Rapport de téléchargement Flagship (fichiers -> work/)\n"
-            "# ok = téléchargé · skip = déjà présent (non réécrasé) · "
-            "manual = à faire soi-même (lien dans desc.txt) · error\n\n"
+            "# Flagship download report (files -> work/)\n"
+            "# ok = downloaded · skip = already present (not overwritten) · "
+            "manual = to be done by hand (link in desc.txt) · error\n\n"
             + "\n".join(report) + "\n", encoding="utf-8")
     return report
 
 
-# ------------------------------------------------------------------ cœur
+# ------------------------------------------------------------------ core
 def _auto_unlock_free(client, detail: dict) -> dict:
-    """Débloque les indices à coût 0 encore verrouillés, puis re-récupère le détail."""
+    """Unlock cost-0 hints that are still locked, then re-fetch the detail."""
     locked_free = [h for h in (detail.get("hints") or []) if h.get("cost", 0) == 0 and not h.get("content")]
     if not locked_free:
         return detail
@@ -356,28 +356,28 @@ def ensure_challenge(client: CTFd, base_dir: Path, summary: dict, watch: bool,
         if desc_changed:
             what.append("description")
             events.append({"kind": "desc", "name": name, "version": version,
-                           "msg": f"description modifiée → desc{version}.txt"})
+                           "msg": f"description changed → desc{version}.txt"})
         if hints_changed:
-            what.append("indices")
+            what.append("hints")
         events.extend(hint_evs)
         ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-        header = f"# Version {version} · {ts} (changement : {', '.join(what)})\n\n"
+        header = f"# Version {version} · {ts} (changed: {', '.join(what)})\n\n"
         (d / f"desc{version}.txt").write_text(_desc_text(detail, file_urls, ext_links, header), encoding="utf-8")
         _save_state(d, {"desc_hash": desc_hash, "hints": hints_now, "version": version})
     return d, events, detail
 
 
 def download_one(client, base_dir, summary, watch=True, auto_free_hints=False):
-    """Télécharge/complète UN challenge, de façon AUTO-RÉPARATRICE.
+    """Download/complete ONE challenge, in a SELF-HEALING way.
 
-    - passe toujours par `ensure_challenge` → recrée `desc.txt` (+ état) s'il manque, puis
-      télécharge les fichiers (branche « nouveau ») ;
-    - si le dossier préexistait, (re)complète les fichiers manquants/échoués dans `work/`
-      (idempotent : les fichiers déjà présents sont sautés).
-    Retourne (chemin, events). Jamais de `work/`/`downloads.txt` sans `desc.txt`.
+    - always goes through `ensure_challenge` → recreates `desc.txt` (+ state) if missing, then
+      downloads the files ("new" branch);
+    - if the folder already existed, (re)completes missing/failed files in `work/`
+      (idempotent: files already present are skipped).
+    Returns (path, events). Never a `work/`/`downloads.txt` without `desc.txt`.
     """
     d, events, detail = ensure_challenge(client, base_dir, summary, watch, auto_free_hints)
-    fresh = any(e.get("kind") == "new" for e in events)  # desc.txt venait d'être (re)créé -> déjà téléchargé
+    fresh = any(e.get("kind") == "new" for e in events)  # desc.txt was just (re)created -> already downloaded
     if not fresh:
         if detail is None:
             detail = client.challenge(summary["id"])
@@ -390,7 +390,7 @@ def download_one(client, base_dir, summary, watch=True, auto_free_hints=False):
 
 
 def list_state(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints: bool = False):
-    """Mode LÉGER : liste sans télécharger. Re-vérifie les changements pour les déjà-téléchargés."""
+    """LIGHT mode: list without downloading. Re-checks changes for already-downloaded ones."""
     base_dir.mkdir(parents=True, exist_ok=True)
     challenges = client.challenges()
     solved = client.solved_ids()
@@ -415,7 +415,7 @@ def list_state(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints
 
 def sync(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints: bool = False,
          workers: int = 6, progress=None):
-    """Mode COMPLET (« Tout synchroniser »), téléchargements PARALLÈLES + progression."""
+    """FULL mode ("Sync all"), PARALLEL downloads + progress."""
     base_dir.mkdir(parents=True, exist_ok=True)
     challenges = client.challenges()
     solved = client.solved_ids()
@@ -451,10 +451,10 @@ def sync(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints: bool
 
 def download_subset(client: CTFd, base_dir: Path, summaries: list[dict], watch: bool = True,
                     auto_free_hints: bool = False, workers: int = 6, progress=None):
-    """Télécharge un SOUS-ENSEMBLE de challenges (ex. une catégorie), en parallèle.
+    """Download a SUBSET of challenges (e.g. a category), in parallel.
 
-    `summaries` sont des entrées déjà listées (avec leur `path`). Les dicts sont mutés sur place
-    (`downloaded`, `_detail`) pour refléter l'état. Retourne (summaries, events).
+    `summaries` are already-listed entries (with their `path`). The dicts are mutated in place
+    (`downloaded`, `_detail`) to reflect the state. Returns (summaries, events).
     """
     base_dir.mkdir(parents=True, exist_ok=True)
     all_events, lock = [], threading.Lock()
@@ -483,9 +483,9 @@ def download_subset(client: CTFd, base_dir: Path, summaries: list[dict], watch: 
     return summaries, all_events
 
 
-# ------------------------------------------------------------------ cache (mode hors-ligne)
+# ------------------------------------------------------------------ cache (offline mode)
 def save_json(base_dir: Path, name: str, data) -> None:
-    """Écrit un cache JSON dans <base>/.flagship/<name> (silencieux en cas d'échec)."""
+    """Write a JSON cache to <base>/.flagship/<name> (silent on failure)."""
     try:
         d = base_dir / ".flagship"
         d.mkdir(parents=True, exist_ok=True)
@@ -495,7 +495,7 @@ def save_json(base_dir: Path, name: str, data) -> None:
 
 
 def load_json(base_dir: Path, name: str, default=None):
-    """Relit un cache JSON ; renvoie `default` si absent/illisible."""
+    """Read a JSON cache back; returns `default` if missing/unreadable."""
     try:
         return json.loads((base_dir / ".flagship" / name).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -503,12 +503,12 @@ def load_json(base_dir: Path, name: str, default=None):
 
 
 def save_cache(base_dir: Path, challenges: list[dict]) -> None:
-    """Mémorise la dernière liste de challenges synchronisée (mode hors-ligne)."""
+    """Remember the last synced challenge list (offline mode)."""
     save_json(base_dir, "challenges_cache.json", challenges)
 
 
 def load_cache(base_dir: Path) -> list[dict]:
-    """Relit la dernière liste de challenges synchronisée (liste vide si aucune)."""
+    """Read back the last synced challenge list (empty list if none)."""
     return load_json(base_dir, "challenges_cache.json", []) or []
 
 
@@ -524,13 +524,13 @@ def write_flag(path, flag: str) -> None:
         p.write_text(flag.strip() + "\n", encoding="utf-8")
 
 
-# ------------------------------------------------------------ tentatives de flag
+# ------------------------------------------------------------ flag attempts
 def _attempts_path(base_dir: Path) -> Path:
     return base_dir / ".flagship" / "attempts.json"
 
 
 def load_attempts(base_dir: Path) -> dict:
-    """Index central {id_challenge: [flags incorrects déjà soumis]}."""
+    """Central index {challenge_id: [incorrect flags already submitted]}."""
     try:
         return json.loads(_attempts_path(base_dir).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -538,16 +538,16 @@ def load_attempts(base_dir: Path) -> dict:
 
 
 def was_attempted(base_dir: Path, cid: int, flag: str) -> bool:
-    """True si ce flag a DÉJÀ été soumis et refusé pour ce challenge."""
+    """True if this flag was ALREADY submitted and rejected for this challenge."""
     return flag.strip() in load_attempts(base_dir).get(str(cid), [])
 
 
 def record_attempt(base_dir: Path, cid: int, flag: str, correct: bool, path: str | None = None) -> None:
-    """Journalise une tentative. Mémorise les flags INCORRECTS pour éviter de les resoumettre.
+    """Log an attempt. Remembers INCORRECT flags to avoid resubmitting them.
 
-    - Écrit un journal lisible `attempts.log` dans le dossier du challenge (si présent), utile
-      pour un writeup ; n'écrase jamais rien (append only).
-    - Indexe les flags incorrects dans `.flagship/attempts.json` (anti-resoumission).
+    - Writes a readable `attempts.log` in the challenge folder (if present), useful for a
+      writeup; never overwrites anything (append only).
+    - Indexes incorrect flags in `.flagship/attempts.json` (resubmission guard).
     """
     flag = flag.strip()
     if path:
@@ -574,23 +574,23 @@ def record_attempt(base_dir: Path, cid: int, flag: str, correct: bool, path: str
 
 
 def write_progress(base_dir: Path, challenges: list[dict], ctf_name: str = "CTF") -> Path:
-    """Génère un PROGRESS_flagship.md récapitulatif à la racine de base_dir."""
+    """Generate a PROGRESS_flagship.md summary at the root of base_dir."""
     rows = sorted(challenges, key=lambda c: (c.get("category", ""), c.get("value", 0), c.get("name", "")))
     solved = sum(1 for c in challenges if c.get("solved"))
     dl = sum(1 for c in challenges if c.get("downloaded"))
     lines = [
         f"# PROGRESS · {ctf_name}", "",
-        f"{solved}/{len(challenges)} résolus · {dl} téléchargés · "
-        f"généré le {datetime.now().strftime('%Y-%m-%d %H:%M')}", "",
-        "| Catégorie | Challenge | Points | Solves | Résolu | Téléchargé |",
-        "|-----------|-----------|--------|--------|--------|------------|",
+        f"{solved}/{len(challenges)} solved · {dl} downloaded · "
+        f"generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}", "",
+        "| Category | Challenge | Points | Solves | Solved | Downloaded |",
+        "|----------|-----------|--------|--------|--------|------------|",
     ]
     for c in rows:
         lines.append(
             f"| {c.get('category','?')} | {c.get('name','?')} | {c.get('value','')} | "
             f"{c.get('solves','')} | {'✔' if c.get('solved') else ''} | "
             f"{'✓' if c.get('downloaded') else ''} |")
-    # nom DISTINCT : ne jamais écraser un PROGRESS.md maintenu à la main par l'utilisateur
+    # DISTINCT name: never overwrite a PROGRESS.md the user maintains by hand
     out = base_dir / "PROGRESS_flagship.md"
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out

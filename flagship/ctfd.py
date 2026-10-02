@@ -1,7 +1,7 @@
-"""Client minimal de l'API CTFd (lecture + soumission).
+"""Minimal CTFd API client (read + submit).
 
-Ne journalise jamais le token. Toutes les méthodes lèvent CTFdError en cas
-de problème réseau/API, avec un message exploitable par la TUI.
+Never logs the token. All methods raise CTFdError on network/API problems,
+with a message the TUI can display.
 """
 
 from __future__ import annotations
@@ -24,53 +24,53 @@ class CTFd:
             }
         )
         self.timeout = timeout
-        self._account_base: str | None = None  # '/api/v1/teams/me' (équipe) ou '/api/v1/users/me' (solo)
+        self._account_base: str | None = None  # '/api/v1/teams/me' (team) or '/api/v1/users/me' (solo)
 
     # -- helpers ---------------------------------------------------------
     def _get(self, path: str) -> dict:
         try:
             r = self._session.get(self.url + path, timeout=self.timeout)
         except requests.RequestException as e:
-            raise CTFdError(f"réseau: {e}") from e
+            raise CTFdError(f"network: {e}") from e
         return self._json(r)
 
     def _post(self, path: str, payload: dict) -> dict:
         try:
             r = self._session.post(self.url + path, json=payload, timeout=self.timeout)
         except requests.RequestException as e:
-            raise CTFdError(f"réseau: {e}") from e
+            raise CTFdError(f"network: {e}") from e
         return self._json(r)
 
     @staticmethod
     def _json(r: requests.Response) -> dict:
-        # messages clairs selon le code HTTP
+        # clear messages depending on the HTTP code
         if r.status_code in (401, 403):
-            raise CTFdError("accès refusé : token invalide/expiré ou challenge verrouillé (HTTP %d)" % r.status_code)
+            raise CTFdError("access denied: invalid/expired token or locked challenge (HTTP %d)" % r.status_code)
         if r.status_code == 429:
-            raise CTFdError("trop de requêtes (429) : réessayer dans un instant (rate-limit CTFd)")
+            raise CTFdError("too many requests (429): try again in a moment (CTFd rate limit)")
         if r.status_code == 404:
-            raise CTFdError("introuvable (404) : mauvais URL/endpoint ou ressource absente")
+            raise CTFdError("not found (404): wrong URL/endpoint or missing resource")
         if r.status_code >= 500:
-            raise CTFdError(f"erreur serveur CTFd (HTTP {r.status_code})")
+            raise CTFdError(f"CTFd server error (HTTP {r.status_code})")
         try:
             data = r.json()
         except ValueError:
-            raise CTFdError(f"réponse non-JSON (HTTP {r.status_code}) : l'URL pointe-t-elle bien vers un CTFd ?")
+            raise CTFdError(f"non-JSON response (HTTP {r.status_code}): does the URL really point to a CTFd?")
         if isinstance(data, dict) and data.get("success") is False:
-            raise CTFdError(str(data.get("message") or data.get("errors") or "échec API"))
-        # certains messages (CTF terminé/pas commencé) arrivent sans "success"
+            raise CTFdError(str(data.get("message") or data.get("errors") or "API failure"))
+        # some messages (CTF over/not started) arrive without "success"
         if isinstance(data, dict) and "message" in data and "data" not in data and "success" not in data:
             raise CTFdError(str(data["message"]))
         return data
 
     # -- endpoints -------------------------------------------------------
     def challenges(self) -> list[dict]:
-        """Liste des challenges visibles (id, name, category, value, solves...)."""
+        """List of visible challenges (id, name, category, value, solves...)."""
         return self._get("/api/v1/challenges").get("data", []) or []
 
     def auth_ok(self) -> bool:
-        """True si le token est accepté par l'API (GET /users/me réussit). Sert à distinguer
-        un token invalide d'un simple refus d'accès aux challenges (CTF terminé/masqués)."""
+        """True if the token is accepted by the API (GET /users/me succeeds). Used to tell
+        an invalid token from a mere access refusal on challenges (CTF over/hidden)."""
         try:
             self._get("/api/v1/users/me")
             return True
@@ -78,16 +78,16 @@ class CTFd:
             return False
 
     def challenge(self, cid: int) -> dict:
-        """Détail d'un challenge (description, files, hints, connection_info...)."""
+        """Challenge detail (description, files, hints, connection_info...)."""
         return self._get(f"/api/v1/challenges/{cid}").get("data", {}) or {}
 
     def _account(self) -> str:
-        """Endpoint du « compte » pertinent pour la compétition : l'ÉQUIPE en mode équipe,
-        sinon l'utilisateur. Détecté une seule fois puis mémorisé.
+        """Endpoint of the "account" relevant to the competition: the TEAM in team mode,
+        otherwise the user. Detected once then remembered.
 
-        En mode équipe, le score, le rang et surtout les RÉSOLUS qui comptent sont au niveau de
-        l'équipe (un flag posé par un coéquipier doit apparaître résolu). `/api/v1/teams/me`
-        échoue en mode solo (teams désactivées) : on retombe alors sur l'utilisateur.
+        In team mode, the score, the rank and above all the SOLVED set that matter are at team
+        level (a flag submitted by a teammate must show as solved). `/api/v1/teams/me`
+        fails in solo mode (teams disabled): we then fall back to the user.
         """
         if self._account_base is None:
             self._account_base = "/api/v1/users/me"
@@ -100,11 +100,11 @@ class CTFd:
         return self._account_base
 
     def is_team_mode(self) -> bool:
-        """True si le CTF est en mode équipe (le compte pertinent est une équipe)."""
+        """True if the CTF is in team mode (the relevant account is a team)."""
         return self._account().startswith("/api/v1/teams")
 
     def solved_ids(self) -> set[int]:
-        """Ensemble des ids résolus par le compte pertinent (ÉQUIPE en mode équipe, sinon soi)."""
+        """Set of ids solved by the relevant account (TEAM in team mode, otherwise self)."""
         try:
             data = self._get(self._account() + "/solves").get("data", []) or []
         except CTFdError:
@@ -117,7 +117,7 @@ class CTFd:
         return out
 
     def submit(self, cid: int, flag: str) -> tuple[str, str]:
-        """Soumet un flag. Retourne (status, message) : status in
+        """Submit a flag. Returns (status, message): status in
         {correct, incorrect, already_solved, ratelimited, ...}."""
         data = self._post(
             "/api/v1/challenges/attempt", {"challenge_id": cid, "submission": flag}
@@ -125,9 +125,9 @@ class CTFd:
         return data.get("status", "?"), data.get("message", "")
 
     def me(self) -> dict:
-        """Compte pertinent : {name, score, place, team}. En mode équipe, renvoie l'ÉQUIPE
-        (nom, score et rang de l'équipe) pour que l'en-tête, les stats et le surlignage du
-        scoreboard correspondent au classement réel. Vide si indisponible."""
+        """Relevant account: {name, score, place, team}. In team mode, returns the TEAM
+        (team name, score and rank) so the header, the stats and the scoreboard highlight
+        match the real ranking. Empty if unavailable."""
         base = self._account()
         try:
             d = self._get(base).get("data", {}) or {}
@@ -137,8 +137,8 @@ class CTFd:
                 "place": d.get("place"), "team": base.startswith("/api/v1/teams")}
 
     def me_user(self) -> dict:
-        """Profil INDIVIDUEL (toujours /users/me) : {id, name, score, place}. Utile en mode
-        équipe pour afficher tes stats perso en plus de celles de l'équipe. Vide si indisponible."""
+        """INDIVIDUAL profile (always /users/me): {id, name, score, place}. Useful in team
+        mode to show your personal stats alongside the team's. Empty if unavailable."""
         try:
             d = self._get("/api/v1/users/me").get("data", {}) or {}
         except CTFdError:
@@ -147,10 +147,10 @@ class CTFd:
                 "score": d.get("score"), "place": d.get("place")}
 
     def team_member_stats(self) -> list[dict]:
-        """Mode équipe : contribution par membre, d'après les solves de l'équipe.
+        """Team mode: per-member contribution, from the team's solves.
 
-        Chaque solve CTFd porte le membre qui l'a résolu (`user: {id, name}`), donc un seul appel
-        suffit. Retourne [{user_id, name, count, solved_ids}] (membres ayant au moins 1 solve).
+        Each CTFd solve carries the member who solved it (`user: {id, name}`), so a single call
+        is enough. Returns [{user_id, name, count, solved_ids}] (members with at least 1 solve).
         """
         if not self.is_team_mode():
             return []
@@ -174,7 +174,7 @@ class CTFd:
         return list(agg.values())
 
     def first_blood(self, cid: int) -> str | None:
-        """Nom du premier solveur d'un challenge (first blood), si dispo."""
+        """Name of the first solver of a challenge (first blood), if available."""
         try:
             d = self._get(f"/api/v1/challenges/{cid}/solves").get("data", []) or []
         except CTFdError:
@@ -182,7 +182,7 @@ class CTFd:
         return d[0].get("name") if d else None
 
     def scoreboard(self, top: int = 50) -> list[dict]:
-        """Classement : liste de {pos, name, score} (tronquée à `top`)."""
+        """Ranking: list of {pos, name, score} (truncated to `top`)."""
         try:
             data = self._get("/api/v1/scoreboard").get("data", []) or []
         except CTFdError:
@@ -197,9 +197,9 @@ class CTFd:
         return out
 
     def unlock_hint(self, hint_id: int) -> str:
-        """Débloque un indice (⚠️ coûte des points). Retourne son contenu."""
+        """Unlock a hint (⚠️ costs points). Returns its content."""
         self._post("/api/v1/unlocks", {"target": hint_id, "type": "hints"})
-        # le contenu est plus fiable via le détail du challenge ; on tente aussi l'endpoint direct
+        # the content is more reliable via the challenge detail; the direct endpoint is also tried
         try:
             data = self._get(f"/api/v1/hints/{hint_id}").get("data", {}) or {}
             return data.get("content", "") or ""
@@ -207,9 +207,9 @@ class CTFd:
             return ""
 
     def download(self, file_path: str, dest, max_bytes: int = 2 * 1024**3) -> tuple[str, str]:
-        """Télécharge un fichier hébergé par la plateforme (authentifié).
+        """Download a file hosted by the platform (authenticated).
 
-        Retourne (statut, détail) : "ok" | "manual" (trop volumineux) | "error".
+        Returns (status, detail): "ok" | "manual" (too large) | "error".
         """
         u = file_path if file_path.startswith("http") else self.url + file_path
         try:
@@ -220,19 +220,19 @@ class CTFd:
         size = int(r.headers.get("Content-Length") or 0)
         if size and size > max_bytes:
             r.close()
-            return "manual", f"{size/1024**3:.1f} Go > 2 Go"
+            return "manual", f"{size/1024**3:.1f} GB > 2 GB"
         return _stream_to(r, dest, max_bytes)
 
     def file_url(self, file_path: str) -> str:
-        """URL complète (avec token de fichier) telle que fournie par l'API."""
+        """Full URL (with file token) as provided by the API."""
         return file_path if file_path.startswith("http") else self.url + file_path
 
     def ctf_end(self) -> float | None:
-        """Timestamp (epoch, secondes) de fin du CTF si l'API l'expose, sinon None.
+        """Timestamp (epoch, seconds) of the CTF end if the API exposes it, otherwise None.
 
-        L'endpoint `/api/v1/configs` est souvent réservé aux admins : en cas de refus
-        (401/403) ou d'absence de la clé, on retourne None silencieusement (la fin peut
-        alors être fournie manuellement via CTF_END dans config.sh).
+        The `/api/v1/configs` endpoint is often admin-only: on refusal (401/403) or a
+        missing key, None is returned silently (the end can then be provided manually via
+        CTF_END in config.sh).
         """
         try:
             data = self._get("/api/v1/configs").get("data", [])
@@ -250,7 +250,7 @@ class CTFd:
 
 
 def _stream_to(r: "requests.Response", dest, max_bytes: int) -> tuple[str, str]:
-    """Écrit le flux dans dest en respectant une taille maxi (garde-fou 2 Go)."""
+    """Write the stream to dest while honouring a max size (2 GB safeguard)."""
     written = 0
     try:
         with open(dest, "wb") as f:
@@ -263,14 +263,14 @@ def _stream_to(r: "requests.Response", dest, max_bytes: int) -> tuple[str, str]:
                         os.remove(dest)
                     except OSError:
                         pass
-                    return "manual", "> 2 Go (interrompu)"
+                    return "manual", "> 2 GB (aborted)"
                 f.write(chunk)
     except (OSError, requests.RequestException) as e:
-        # supprimer le fichier partiel pour qu'un futur retry puisse le re-télécharger
+        # remove the partial file so a later retry can download it again
         try:
             import os
             os.remove(dest)
         except OSError:
             pass
         return "error", str(e)
-    return "ok", f"{written} o"
+    return "ok", f"{written} B"

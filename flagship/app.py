@@ -1,11 +1,11 @@
-"""Flagship : TUI Textual pour un CTFd.
+"""Flagship: Textual TUI for a CTFd instance.
 
-Onglets Challenges / Scoreboard / Stats ; listing léger par défaut, téléchargement à la demande
-(`d`), par catégorie (`C`) ou complet (`D`, parallèle + barre de progression) ; recherche, tri, filtres ;
-soumission, déblocage d'indice, copier la connexion, notes externes, export PROGRESS_flagship.md ;
-notifications (toasts + journal + historique). Le token n'est jamais affiché.
+Challenges / Scoreboard / Stats / Notifications tabs; light listing by default, download on demand
+(`d`), per category (`C`) or full (`D`, parallel + progress bar); search, sort, filters;
+flag submission, hint unlock, copy connection info, external notes, PROGRESS_flagship.md export;
+notifications (toasts + log + history). The token is never displayed.
 
-Lancement : python -m flagship [chemin/config.sh]
+Usage: python -m flagship [path/config.sh]
 """
 
 from __future__ import annotations
@@ -26,6 +26,8 @@ from textual.widgets import (
 from textual import work
 from textual.binding import Binding
 from textual.strip import Strip
+from textual.widget import Widget
+from textual import events
 from rich.text import Text
 from rich.segment import Segment
 from rich.style import Style
@@ -35,59 +37,111 @@ from .config import Config
 from .ctfd import CTFd, CTFdError
 from . import store
 
-BEAM_CHAR = "▏"  # barre verticale fine (U+258F) pour simuler un curseur I-beam
+BEAM_CHAR = "▏"  # thin vertical bar (U+258F) to mimic an I-beam cursor
 
 
 class BeamInput(Input):
-    """Champ de saisie dont le curseur est une barre verticale (« I-beam ») au lieu du
-    bloc inversé par défaut.
+    """Input field whose cursor is a vertical bar ("I-beam") instead of the default
+    reversed block.
 
-    Le bloc natif de Textual est neutralisé (son style est rendu vide le temps du rendu),
-    puis une unique barre est dessinée à la position du curseur. On évite ainsi tout
-    « double curseur » (barre + reste de bloc) sur le premier caractère d'un placeholder
-    large (emoji). En cas d'incompatibilité, repli silencieux sur le curseur standard."""
+    Textual's native block is neutralised (its style is rendered empty during our own render),
+    then a single bar is drawn at the cursor position. This avoids any "double cursor" (bar +
+    leftover block) on the first character of a wide placeholder (emoji). On any
+    incompatibility, it silently falls back to the standard cursor."""
 
     _suppress_native_cursor = False
 
     def get_component_rich_style(self, *names, **kwargs):
-        # neutralise seulement le style du curseur natif pendant notre propre rendu
+        # only neutralise the native cursor style during our own render
         if self._suppress_native_cursor and names == ("input--cursor",):
             return Style()
         return super().get_component_rich_style(*names, **kwargs)
 
     def render_line(self, y: int) -> Strip:
-        # 1re ligne, champ focus, curseur visible (respecte le clignotement)
+        # first line, field focused, cursor visible (honours blinking)
         if y != 0 or not self.has_focus or not self._cursor_visible:
             return super().render_line(y)
         try:
-            # 1) rendu normal mais SANS le bloc du curseur natif
+            # 1) normal render but WITHOUT the native cursor block
             self._suppress_native_cursor = True
             strip = super().render_line(y)
             self._suppress_native_cursor = False
 
-            # couleur de la barre = couleur de remplissage du bloc natif (suit le thème)
+            # bar colour = fill colour of the native block (follows the theme)
             cur = super().get_component_rich_style("input--cursor")
             bar_style = self.rich_style + Style(color=cur.bgcolor, bold=True)
             bar = Strip([Segment(BEAM_CHAR, bar_style)])
             width = strip.cell_length
 
-            # 2) colonne visuelle du curseur (gère les caractères larges)
+            # 2) visual column of the cursor (handles wide characters)
             col = cell_len(self.value[: self.cursor_position]) - self.scroll_offset.x
             if col < 0 or col > width:
                 return super().render_line(y)
 
-            # 3) remplace l'unique cellule du curseur par la barre
+            # 3) replace the single cursor cell with the bar
             left = strip.crop(0, col)
             right = strip.crop(col + 1, width)
             return Strip.join([left, bar, right])
         except Exception:
             self._suppress_native_cursor = False
-            return super().render_line(y)  # repli : curseur par défaut
+            return super().render_line(y)  # fallback: default cursor
+
+class Splitter(Widget):
+    """Vertical separator draggable with the mouse between the challenge list and the detail.
+    Drag = resize the left column; double-click = back to the default width."""
+
+    DEFAULT_CSS = """
+    Splitter { width: 1; height: 1fr; color: $accent; }
+    Splitter:hover, Splitter.-dragging { color: $warning; background: $boost; }
+    """
+    MIN_LEFT = 16
+    MIN_RIGHT = 24
+
+    def __init__(self, left_id: str, **kw):
+        super().__init__(**kw)
+        self._left_id = left_id
+        self._dragging = False
+
+    def render(self) -> Text:
+        return Text("\n".join("┃" for _ in range(max(1, self.size.height))))
+
+    def _left(self) -> Widget:
+        return self.screen.query_one(f"#{self._left_id}")
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        self._dragging = True
+        self.add_class("-dragging")
+        self.capture_mouse()
+        event.stop()
+
+    def on_mouse_move(self, event: events.MouseMove) -> None:
+        if not self._dragging:
+            return
+        left = self._left()
+        total = left.region.width + self.region.width + self.parent.children[-1].region.width
+        width = event.screen_x - left.region.x
+        width = max(self.MIN_LEFT, min(width, total - self.MIN_RIGHT - self.region.width))
+        left.styles.width = width
+        event.stop()
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        if self._dragging:
+            self._dragging = False
+            self.remove_class("-dragging")
+            self.release_mouse()
+            self.app._save_ui_state()
+            event.stop()
+
+    def on_click(self, event: events.Click) -> None:
+        if event.chain >= 2:
+            self._left().styles.width = "42%"
+            self.app._save_ui_state()
+
 
 FILTERS = ("all", "unsolved", "solved")
-FILTER_LABEL = {"all": "tous", "unsolved": "non résolus", "solved": "résolus"}
+FILTER_LABEL = {"all": "all", "unsolved": "unsolved", "solved": "solved"}
 SORTS = ("category", "points", "solves")
-SORT_LABEL = {"category": "catégorie", "points": "points", "solves": "solves"}
+SORT_LABEL = {"category": "category", "points": "points", "solves": "solves"}
 
 
 class ConfirmScreen(ModalScreen[bool]):
@@ -106,16 +160,16 @@ class ConfirmScreen(ModalScreen[bool]):
         with Vertical(id="box"):
             yield Static(self.question)
             with Horizontal(id="row"):
-                yield Button("Oui", variant="warning", id="yes")
-                yield Button("Non", variant="primary", id="no")
+                yield Button("Yes", variant="warning", id="yes")
+                yield Button("No", variant="primary", id="no")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "yes")
 
 
 def build_member_md(name: str, challenges: list[dict], solved_ids: set[int]) -> str:
-    """Markdown du détail d'un membre : « Par catégorie » + « Progression par catégorie »,
-    calculés à partir des challenges qu'il a résolus (classé par points décroissants)."""
+    """Markdown for a member's detail: "By category" + "Progress by category",
+    computed from the challenges they solved (ranked by descending points)."""
     cats: dict[str, dict] = {}
     total_s = total_p = 0
     for c in challenges:
@@ -129,18 +183,18 @@ def build_member_md(name: str, challenges: list[dict], solved_ids: set[int]) -> 
             d["pw"] += v
             total_s += 1
             total_p += v
-    md = [f"# {name}", "", f"**Résolus** : {total_s}  ·  **Points** : {total_p}"]
+    md = [f"# {name}", "", f"**Solved**: {total_s}  ·  **Points**: {total_p}"]
     done = {k: v for k, v in cats.items() if v["s"] > 0}
     if not done:
-        md += ["", "*Aucun challenge résolu pour l'instant.*"]
+        md += ["", "*No challenge solved yet.*"]
         return "\n".join(md)
     order = sorted(done, key=lambda k: (-done[k]["pw"], -done[k]["s"], k.lower()))
-    md += ["", "## Par catégorie (classé par points)", "",
-           "| Catégorie | Résolus | Points |", "|-----------|---------|--------|"]
+    md += ["", "## By category (ranked by points)", "",
+           "| Category | Solved | Points |", "|----------|--------|--------|"]
     for cat in order:
         d = done[cat]
         md.append(f"| {cat} | {d['s']}/{d['n']} | {d['pw']}/{d['pt']} |")
-    md += ["", "## Progression par catégorie", "", "```"]
+    md += ["", "## Progress by category", "", "```"]
     wname = max(len(c) for c in order)
     for cat in order:
         d = done[cat]
@@ -151,8 +205,8 @@ def build_member_md(name: str, challenges: list[dict], solved_ids: set[int]) -> 
 
 
 class MemberStatsScreen(ModalScreen[None]):
-    """Fenêtre du détail d'un membre (ouverte en cliquant sur son pseudo dans l'onglet Stats)."""
-    BINDINGS = [("escape", "dismiss", "Fermer")]
+    """Member detail window (opened by clicking their name in the Stats tab)."""
+    BINDINGS = [("escape", "dismiss", "Close")]
     CSS = """
     MemberStatsScreen { align: center middle; }
     #mbox { width: 80%; height: 80%; border: thick $accent; background: $surface; padding: 1 2; }
@@ -167,7 +221,7 @@ class MemberStatsScreen(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="mbox"):
-            yield Static("Échap pour fermer", id="mhead")
+            yield Static("Esc to close", id="mhead")
             with VerticalScroll():
                 yield Markdown(build_member_md(self._name, self._challenges, self._solved),
                                open_links=False)
@@ -179,7 +233,7 @@ class MemberStatsScreen(ModalScreen[None]):
 class Flagship(App):
     CSS = """
     #search { dock: top; }
-    #treecol { width: 42%; border-right: solid $accent; }
+    #treecol { width: 42%; }
     #legend { height: 1; padding: 0 1; background: $panel; color: $text-muted; }
     #tree { height: 1fr; }
     #rightcol { width: 1fr; }
@@ -193,22 +247,22 @@ class Flagship(App):
     """
 
     BINDINGS = [
-        ("r", "refresh", "Rafraîchir"),
-        ("d", "download", "Télécharger"),
-        ("D", "sync_all", "Tout sync"),
+        ("r", "refresh", "Refresh"),
+        ("d", "download", "Download"),
+        ("D", "sync_all", "Sync all"),
         ("C", "download_category", "Cat. dl"),
-        ("f", "cycle_filter", "Filtre"),
-        ("o", "cycle_sort", "Tri"),
-        ("t", "cycle_theme", "Thème"),
-        ("slash", "focus_search", "Rechercher"),
-        ("s", "focus_flag", "Soumettre"),
-        ("u", "unlock_hint", "Indice"),
-        ("c", "copy_conn", "Copier"),
-        ("w", "open_folder", "Dossier"),
+        ("f", "cycle_filter", "Filter"),
+        ("o", "cycle_sort", "Sort"),
+        ("t", "cycle_theme", "Theme"),
+        ("slash", "focus_search", "Search"),
+        ("s", "focus_flag", "Submit"),
+        ("u", "unlock_hint", "Hint"),
+        ("c", "copy_conn", "Copy"),
+        ("w", "open_folder", "Folder"),
         ("e", "edit_notes", "Notes"),
         ("p", "export_progress", "Progress"),
-        ("q", "quit", "Quitter"),
-        Binding("escape", "unfocus", "Quitter le champ", show=False),
+        ("q", "quit", "Quit"),
+        Binding("escape", "unfocus", "Leave field", show=False),
     ]
 
     def __init__(self, cfg: Config):
@@ -220,25 +274,25 @@ class Flagship(App):
         self.filter_mode = "all"
         self.sort_mode = "category"
         self.search = ""
-        self.collapsed_cats: set[str] = set()  # catégories repliées (défaut = dépliées)
-        self._building = False                  # garde anti-boucle pendant la reconstruction de l'arbre
+        self.collapsed_cats: set[str] = set()  # collapsed categories (default = expanded)
+        self._building = False                  # re-entrancy guard while the tree is being rebuilt
         self.me: dict = {}
-        self._personal: dict = {}             # stats individuelles (mode équipe uniquement)
-        self._members: list[dict] = []        # contribution par membre de l'équipe (mode équipe)
+        self._personal: dict = {}             # individual stats (team mode only)
+        self._members: list[dict] = []        # per-member team contribution (team mode)
         self._last_scoreboard: list[dict] = []
         self._detail_cache: dict[int, dict] = {}
         self._fb_cache: dict[int, str | None] = {}
         self.notifications: list[str] = []
         self._first_sync = True
-        self._syncing = False               # True pendant « Tout synchroniser » (évite l'annulation par le poll)
-        self._tree_sig = None               # signature des données affichées (évite les rebuilds inutiles)
-        self._ctf_end = self._parse_end(cfg.ctf_end)  # epoch de fin (compte à rebours) ou None
+        self._syncing = False               # True during "Sync all" (prevents the poll from cancelling it)
+        self._tree_sig = None               # signature of the displayed data (avoids useless rebuilds)
+        self._ctf_end = self._parse_end(cfg.ctf_end)  # end epoch (countdown) or None
         self._log_path = cfg.base_dir / ".flagship" / "notifications.log"
         self._state_path = cfg.base_dir / ".flagship" / "state.json"
 
     @staticmethod
     def _parse_end(raw: str | None) -> float | None:
-        """Interprète CTF_END : epoch (nombre) ou date ISO (ex. 2026-10-05T18:00)."""
+        """Interpret CTF_END: epoch (number) or ISO date (e.g. 2026-10-05T18:00)."""
         raw = (raw or "").strip()
         if not raw:
             return None
@@ -254,37 +308,38 @@ class Flagship(App):
     # -- layout ----------------------------------------------------------
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        # espace en tête : le curseur I-beam clignote dessus (col 0) sans masquer l'emoji
-        yield BeamInput(placeholder=" 🔎 Rechercher…  ( / )", id="search")
+        # leading space: the I-beam cursor blinks on it (col 0) without hiding the emoji
+        yield BeamInput(placeholder=" 🔎 Search…  ( / )", id="search")
         with TabbedContent(initial="tab-chal"):
             with TabPane("Challenges", id="tab-chal"):
                 with Horizontal():
                     with Vertical(id="treecol"):
                         yield Static(
-                            "[cyan]▣[/cyan] [grey42]▢[/grey42] fichiers    "
-                            "[green]●[/green] [grey42]○[/grey42] résolu",
+                            "[cyan]▣[/cyan] [grey42]▢[/grey42] files    "
+                            "[green]●[/green] [grey42]○[/grey42] solved",
                             id="legend")
                         yield Tree("Challenges", id="tree")
+                    yield Splitter("treecol", id="splitter")
                     with Vertical(id="rightcol"):
                         with VerticalScroll(id="detailwrap"):
-                            yield Markdown("*Sélectionne un challenge à gauche.*", id="detail")
-                        # espace en tête : le curseur I-beam clignote dessus sans masquer l'emoji
+                            yield Markdown("*Select a challenge on the left.*", id="detail")
+                        # leading space: the I-beam cursor blinks on it without hiding the emoji
                         yield BeamInput(placeholder=" 🚩", id="flag")
             with TabPane("Scoreboard", id="tab-score"):
                 yield DataTable(id="scoreboard")
             with TabPane("Stats", id="tab-stats"):
                 with VerticalScroll():
-                    yield Markdown("*Statistiques…*", id="stats", open_links=False)
+                    yield Markdown("*Statistics…*", id="stats", open_links=False)
             with TabPane("Notifications", id="tab-notifs"):
                 with VerticalScroll():
-                    yield Static("Aucune notification.", id="notifs")
+                    yield Static("No notifications.", id="notifs")
         yield ProgressBar(id="progress", show_eta=False)
         yield Footer()
 
     def on_mount(self) -> None:
         self.query_one("#tree", Tree).show_root = False
         dt = self.query_one("#scoreboard", DataTable)
-        dt.add_columns("#", "Équipe / Joueur", "Score")
+        dt.add_columns("#", "Team / Player", "Score")
         dt.cursor_type = "row"
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
         self._restore_ui_state()
@@ -294,10 +349,10 @@ class Flagship(App):
         self.list_worker()
         self.scoreboard_worker()
         self.me_worker()
-        if self._ctf_end is None:        # fin non fournie par config.sh : tenter l'API
+        if self._ctf_end is None:        # end not provided by config.sh: try the API
             self.ctf_meta_worker()
         self._update_title()
-        self.set_interval(30, self._update_title)  # rafraîchit le compte à rebours
+        self.set_interval(30, self._update_title)  # refresh the countdown
         if self.cfg.poll_interval and self.cfg.poll_interval > 0:
             self.set_interval(self.cfg.poll_interval, self.list_worker)
             self.set_interval(self.cfg.poll_interval, self.scoreboard_worker)
@@ -306,7 +361,7 @@ class Flagship(App):
     def on_unmount(self) -> None:
         self._save_ui_state()
 
-    # -- état d'interface persistant ------------------------------------
+    # -- persistent UI state ------------------------------------
     def _restore_ui_state(self) -> None:
         try:
             s = json.loads(self._state_path.read_text(encoding="utf-8"))
@@ -315,9 +370,23 @@ class Flagship(App):
             self.collapsed_cats = set(s.get("collapsed", []))
             self._last_selected_id = s.get("selected")
             self._pref_theme = s.get("theme")
+            self._tree_width = s.get("tree_width")
         except (OSError, ValueError):
             self._last_selected_id = None
             self._pref_theme = None
+            self._tree_width = None
+        w = getattr(self, "_tree_width", None)
+        if isinstance(w, str) and w.endswith("%"):
+            self.query_one("#treecol").styles.width = w
+
+    def _tree_width_str(self) -> str | None:
+        """List width as a % of the Challenges area (independent of terminal size)."""
+        try:
+            col = self.query_one("#treecol")
+            total = col.parent.region.width
+            return f"{max(5, min(95, round(col.region.width * 100 / total)))}%" if total else None
+        except Exception:
+            return getattr(self, "_tree_width", None)
 
     def _save_ui_state(self) -> None:
         try:
@@ -327,6 +396,7 @@ class Flagship(App):
                 "selected": (self.selected or {}).get("id"),
                 "collapsed": sorted(self.collapsed_cats),
                 "theme": self.theme,
+                "tree_width": self._tree_width_str(),
             }), encoding="utf-8")
         except OSError:
             pass
@@ -345,36 +415,36 @@ class Flagship(App):
         self.notify(msg, severity=severity, timeout=timeout)
 
     def _render_notifs(self) -> None:
-        """Met à jour l'onglet Notifications (plus récentes en haut)."""
+        """Update the Notifications tab (most recent on top)."""
         try:
             w = self.query_one("#notifs", Static)
-        except Exception:  # noqa: BLE001  (widget pas encore monté)
+        except Exception:  # noqa: BLE001  (widget not mounted yet)
             return
-        # Text() => pas d'interprétation du balisage (les horodatages [HH:MM:SS] restent littéraux)
-        w.update(Text("\n".join(reversed(self.notifications)) or "Aucune notification."))
+        # Text() => no markup interpretation (the [HH:MM:SS] timestamps stay literal)
+        w.update(Text("\n".join(reversed(self.notifications)) or "No notifications."))
 
-    # -- workers réseau --------------------------------------------------
+    # -- network workers --------------------------------------------------
     @work(thread=True, exclusive=True, group="sync")
     def list_worker(self) -> None:
-        if self._syncing:  # une synchro complète est en cours : ne pas interférer
+        if self._syncing:  # a full sync is running: do not interfere
             return
         try:
             challenges, events = store.list_state(
                 self.client, self.cfg.base_dir, self.cfg.watch_changes, self.cfg.auto_unlock_free_hints)
         except CTFdError as e:
-            # diagnostic : token valide mais challenges inaccessibles (CTF terminé/masqués) ?
+            # diagnosis: valid token but challenges unreachable (CTF over/hidden)?
             hint = ""
-            if "403" in str(e) or "accès refusé" in str(e):
+            if "403" in str(e) or "access denied" in str(e):
                 if self.client.auth_ok():
-                    hint = " (token OK : challenges masqués — CTF terminé ou pas encore commencé)"
+                    hint = " (token OK: challenges hidden — CTF over or not started yet)"
                 else:
-                    hint = " (token refusé : régénère-le dans Settings > Access Tokens)"
-            cached = store.load_cache(self.cfg.base_dir)  # mode hors-ligne
+                    hint = " (token rejected: regenerate it in Settings > Access Tokens)"
+            cached = store.load_cache(self.cfg.base_dir)  # offline mode
             if cached:
-                self.call_from_thread(self._emit, f"📴 Hors-ligne : liste en cache{hint}", "warning", 7)
+                self.call_from_thread(self._emit, f"📴 Offline: showing cached list{hint}", "warning", 7)
                 self.call_from_thread(self._apply_challenges, cached, [])
             else:
-                self.call_from_thread(self._emit, f"Liste impossible : {e}{hint}", "error", 8)
+                self.call_from_thread(self._emit, f"Cannot list challenges: {e}{hint}", "error", 8)
             return
         self.call_from_thread(self._apply_challenges, challenges, events)
 
@@ -382,15 +452,15 @@ class Flagship(App):
     def me_worker(self) -> None:
         me = self.client.me()
         personal, members = None, None
-        if me and self.client.is_team_mode():  # en équipe : stats perso + contribution des membres
+        if me and self.client.is_team_mode():  # in a team: personal stats + member contributions
             personal = self.client.me_user()
             members = self.client.team_member_stats()
         if me:
-            # mémorise le profil (score/rang/équipe) pour le revoir hors-ligne / après le CTF
+            # cache the profile (score/rank/team) to see it again offline / after the CTF
             store.save_json(self.cfg.base_dir, "me_cache.json",
                             {"me": me, "personal": personal, "members": members})
             self.call_from_thread(self._apply_me, me, personal, members)
-        else:  # API indisponible (hors-ligne ou CTF terminé) : réafficher le dernier profil connu
+        else:  # API unavailable (offline or CTF over): show the last known profile again
             cached = store.load_json(self.cfg.base_dir, "me_cache.json")
             if cached and cached.get("me"):
                 self.call_from_thread(self._apply_me, cached["me"],
@@ -407,20 +477,20 @@ class Flagship(App):
         self._update_title()
 
     def _countdown_str(self) -> str:
-        """Texte du compte à rebours (ou '' si pas de fin connue)."""
+        """Countdown text (or '' if no end is known)."""
         if not self._ctf_end:
             return ""
         rem = int(self._ctf_end - datetime.now().timestamp())
         if rem <= 0:
-            return "⏳ terminé"
+            return "⏳ ended"
         mins, _ = divmod(rem, 60)
         hours, mins = divmod(mins, 60)
         days, hours = divmod(hours, 24)
         if days:
-            return f"⏳ fin dans {days}j{hours:02d}h"
+            return f"⏳ ends in {days}d{hours:02d}h"
         if hours:
-            return f"⏳ fin dans {hours}h{mins:02d}"
-        return f"⏳ fin dans {mins}min"
+            return f"⏳ ends in {hours}h{mins:02d}"
+        return f"⏳ ends in {mins}min"
 
     def _update_title(self) -> None:
         parts = [f"Flagship · {self.cfg.ctf_name}"]
@@ -439,7 +509,7 @@ class Flagship(App):
             return
         chs = self.challenges
         if not chs:
-            w.update("*Aucune donnée pour le moment. Lance une synchro (`r`).*")
+            w.update("*No data yet. Run a sync (`r`).*")
             return
         total = len(chs)
         solved = [c for c in chs if c.get("solved")]
@@ -448,44 +518,44 @@ class Flagship(App):
         pts_all = sum(int(c.get("value") or 0) for c in chs)
         s, p = self.me.get("score"), self.me.get("place")
         team = self.me.get("team")
-        md = [f"# Statistiques · {self.cfg.ctf_name}", ""]
+        md = [f"# Statistics · {self.cfg.ctf_name}", ""]
         if self.me.get("name"):
-            who = "Équipe" if team else "Joueur"
+            who = "Team" if team else "Player"
             md.append(f"**{who}** : {self.me['name']}")
         if s is not None:
-            label = "Score (équipe)" if team else "Score"
-            md.append(f"**{label}** : {s}" + (f"  ·  **Rang** : #{p}" if p else ""))
-        md.append(f"**Résolus** : {len(solved)} / {total}  ·  "
-                  f"**Points gagnés** : {pts_won} / {pts_all}")
-        md.append(f"**Téléchargés** : {len(dled)} / {total}")
-        if self._personal:  # mode équipe : contribution de chaque membre
+            label = "Score (team)" if team else "Score"
+            md.append(f"**{label}** : {s}" + (f"  ·  **Rank**: #{p}" if p else ""))
+        md.append(f"**Solved**: {len(solved)} / {total}  ·  "
+                  f"**Points earned**: {pts_won} / {pts_all}")
+        md.append(f"**Downloaded**: {len(dled)} / {total}")
+        if self._personal:  # team mode: each member's contribution
             val = {int(c["id"]): int(c.get("value") or 0) for c in chs if c.get("id") is not None}
             my_id = self._personal.get("id")
             ps, pp = self._personal.get("score"), self._personal.get("place")
-            md += ["", "## Membres de l'équipe"]
+            md += ["", "## Team members"]
             if ps is not None:
                 rank = f"#{pp}" if pp else "—"
-                md.append(f"*Ton rang individuel : {rank} · ton score : {ps}*")
+                md.append(f"*Your individual rank: {rank} · your score: {ps}*")
             rows = [(m.get("name", "?"), m.get("count", 0),
                      sum(val.get(cid, 0) for cid in m.get("solved_ids", [])), m.get("user_id"))
                     for m in self._members]
-            # garantit ta propre ligne même si tu n'as encore rien résolu
+            # guarantee your own row even if you have not solved anything yet
             if my_id is not None and my_id not in {r[3] for r in rows}:
-                rows.append((self._personal.get("name", "toi"), 0, 0, my_id))
+                rows.append((self._personal.get("name", "you"), 0, 0, my_id))
             rows.sort(key=lambda r: (-r[2], -r[1], r[0].lower()))
-            md += ["*Clique sur un pseudo pour voir son détail par catégorie.*", "",
-                   "| Membre | Résolus | Points |", "|--------|---------|--------|"]
+            md += ["*Click a name to see their breakdown by category.*", "",
+                   "| Member | Solved | Points |", "|--------|--------|--------|"]
             for name, cnt, pts, uid in rows:
                 me_row = my_id is not None and uid == my_id
-                label = f"{name} (toi)" if me_row else name
-                # pseudo cliquable (href 'member:<id>') intercepté par on_markdown_link_clicked
+                label = f"{name} (you)" if me_row else name
+                # clickable name (href 'member:<id>') intercepted by on_markdown_link_clicked
                 link = f"[{label}](member:{uid})" if uid is not None else label
                 nm = f"**{link}**" if me_row else link
                 c2 = f"**{cnt}**" if me_row else str(cnt)
                 c3 = f"**{pts}**" if me_row else str(pts)
                 md.append(f"| {nm} | {c2} | {c3} |")
             if not rows:
-                md.append("| *(aucun solve pour le moment)* |  |  |")
+                md.append("| *(no solves yet)* |  |  |")
         cats: dict[str, dict] = {}
         for c in chs:
             d = cats.setdefault(c.get("category", "?"), {"n": 0, "s": 0, "dl": 0, "pw": 0, "pt": 0})
@@ -497,13 +567,13 @@ class Flagship(App):
                 d["pw"] += v
             if c.get("downloaded"):
                 d["dl"] += 1
-        md += ["", "## Par catégorie", "",
-               "| Catégorie | Résolus | Points | Téléchargés |",
-               "|-----------|---------|--------|-------------|"]
+        md += ["", "## By category", "",
+               "| Category | Solved | Points | Downloaded |",
+               "|----------|--------|--------|------------|"]
         for cat in sorted(cats):
             d = cats[cat]
             md.append(f"| {cat} | {d['s']}/{d['n']} | {d['pw']}/{d['pt']} | {d['dl']}/{d['n']} |")
-        md += ["", "## Progression par catégorie", "", "```"]
+        md += ["", "## Progress by category", "", "```"]
         wname = max((len(cat) for cat in cats), default=0)
         for cat in sorted(cats):
             d = cats[cat]
@@ -514,8 +584,8 @@ class Flagship(App):
         w.update("\n".join(md))
 
     def on_markdown_link_clicked(self, event) -> None:
-        """Clic sur un pseudo (href 'member:<id>') dans l'onglet Stats → ouvre sa box de détail.
-        Les autres liens (liens externes du détail, http) sont ignorés ici."""
+        """Click on a name (href 'member:<id>') in the Stats tab → opens their detail box.
+        Other links (external links in the detail, http) are ignored here."""
         href = getattr(event, "href", "") or ""
         if not href.startswith("member:"):
             return
@@ -538,10 +608,10 @@ class Flagship(App):
             self._members = members
         self._update_title()
         self._render_stats()
-        if self._last_scoreboard:  # re-surligner ta ligne sans refetch
+        if self._last_scoreboard:  # re-highlight your row without refetching
             self._fill_scoreboard(self._last_scoreboard)
 
-    @work(thread=True, exclusive=True, group="syncall")  # groupe distinct : non annulé par le poll/list
+    @work(thread=True, exclusive=True, group="syncall")  # separate group: not cancelled by the poll/list
     def sync_all_worker(self) -> None:
         self._syncing = True
         self.call_from_thread(self._show_progress, True)
@@ -549,20 +619,20 @@ class Flagship(App):
         def progress(done, total):
             self.call_from_thread(self._set_progress, done, total)
 
-        self.call_from_thread(self._emit, "⏳ Synchronisation complète…", "information", 3)
+        self.call_from_thread(self._emit, "⏳ Full sync…", "information", 3)
         try:
             challenges, events = store.sync(
                 self.client, self.cfg.base_dir, self.cfg.watch_changes,
                 self.cfg.auto_unlock_free_hints, self.cfg.download_workers, progress)
         except CTFdError as e:
-            self.call_from_thread(self._emit, f"Sync complète impossible : {e}", "error", 6)
+            self.call_from_thread(self._emit, f"Full sync failed: {e}", "error", 6)
             return
         finally:
             self._syncing = False
             self.call_from_thread(self._show_progress, False)
         n = sum(1 for c in challenges if c.get("downloaded"))
         self.call_from_thread(self._apply_challenges, challenges, events)
-        self.call_from_thread(self._emit, f"✅ Sync complète : {n} challenges téléchargés.", "information", 6)
+        self.call_from_thread(self._emit, f"✅ Full sync: {n} challenges downloaded.", "information", 6)
 
     def _show_progress(self, on: bool) -> None:
         pb = self.query_one("#progress", ProgressBar)
@@ -579,9 +649,9 @@ class Flagship(App):
             path, events = store.download_one(
                 self.client, self.cfg.base_dir, summary, self.cfg.watch_changes, self.cfg.auto_unlock_free_hints)
         except CTFdError as e:
-            self.call_from_thread(self._emit, f"Téléchargement KO : {e}", "error")
+            self.call_from_thread(self._emit, f"Download failed: {e}", "error")
             return
-        downloaded = (Path(path) / "desc.txt").exists()  # état réel sur disque (auto-réparé)
+        downloaded = (Path(path) / "desc.txt").exists()  # actual state on disk (self-healed)
         self.call_from_thread(self._after_download, int(summary["id"]), path, downloaded,
                               summary.get("name", "?"), events)
 
@@ -590,7 +660,7 @@ class Flagship(App):
             if int(c.get("id", -1)) == cid:
                 c["downloaded"] = downloaded
                 c["path"] = path
-        self._emit(f"⬇ {name} : à jour", "information", 5)
+        self._emit(f"⬇ {name}: up to date", "information", 5)
         self._apply_challenges(self.challenges, events)
 
     @work(thread=True, exclusive=True, group="score")
@@ -599,7 +669,7 @@ class Flagship(App):
         if rows:
             store.save_json(self.cfg.base_dir, "scoreboard_cache.json", rows)
             self.call_from_thread(self._fill_scoreboard, rows)
-        else:  # API indisponible : réafficher le dernier scoreboard connu
+        else:  # API unavailable: show the last known scoreboard again
             cached = store.load_json(self.cfg.base_dir, "scoreboard_cache.json")
             if cached:
                 self.call_from_thread(self._fill_scoreboard, cached)
@@ -626,7 +696,7 @@ class Flagship(App):
             except Exception:  # noqa: BLE001
                 pass
 
-    # -- application des données ----------------------------------------
+    # -- applying data ----------------------------------------
     def _apply_challenges(self, challenges: list[dict], events: list[dict] | None = None) -> None:
         prev_ids = {int(c["id"]) for c in self.challenges}
         prev_solved = {int(c["id"]) for c in self.challenges if c.get("solved")}
@@ -634,7 +704,7 @@ class Flagship(App):
             if c.get("_detail"):
                 self._detail_cache[int(c["id"])] = c["_detail"]
         self.challenges = challenges
-        # ne reconstruire l'arbre que si l'affichage change réellement (sinon le curseur sauterait au poll)
+        # only rebuild the tree if the display really changes (otherwise the cursor would jump on poll)
         sig = tuple((int(c.get("id", 0)), bool(c.get("solved")), bool(c.get("downloaded")),
                      c.get("solves"), c.get("value"), c.get("name"), c.get("category"))
                     for c in sorted(challenges, key=lambda x: int(x.get("id", 0))))
@@ -643,22 +713,22 @@ class Flagship(App):
             self._rebuild_tree()
         solved = sum(1 for c in challenges if c.get("solved"))
         dl = sum(1 for c in challenges if c.get("downloaded"))
-        self.sub_title = (f"{solved}/{len(challenges)} résolus · {dl} téléchargés · "
-                          f"filtre : {FILTER_LABEL[self.filter_mode]} · tri : {SORT_LABEL[self.sort_mode]}")
+        self.sub_title = (f"{solved}/{len(challenges)} solved · {dl} downloaded · "
+                          f"filter: {FILTER_LABEL[self.filter_mode]} · sort: {SORT_LABEL[self.sort_mode]}")
         self._render_stats()
 
         for ev in events or []:
             if ev.get("kind") == "desc":
-                self._emit(f"✏️  {ev['name']} : {ev['msg']}", "warning", 7)
+                self._emit(f"✏️  {ev['name']}: {ev['msg']}", "warning", 7)
             elif ev.get("kind") == "hint":
-                self._emit(f"💡 {ev['name']} : {ev['msg']}", "information", 6)
+                self._emit(f"💡 {ev['name']}: {ev['msg']}", "information", 6)
         if not self._first_sync and prev_ids:
             for c in challenges:
                 cid = int(c["id"])
                 if cid not in prev_ids:
-                    self._emit(f"🆕 Nouveau : {c.get('name','?')} [{c.get('category','?')}]", "information", 7)
+                    self._emit(f"🆕 New: {c.get('name','?')} [{c.get('category','?')}]", "information", 7)
                 if c.get("solved") and cid not in prev_solved:
-                    self._emit(f"✔ Résolu : {c.get('name','?')}", "information", 4)
+                    self._emit(f"✔ Solved: {c.get('name','?')}", "information", 4)
         if self._first_sync:
             self._reselect_last()
         self._first_sync = False
@@ -674,7 +744,7 @@ class Flagship(App):
                 self.detail_worker(int(c["id"]))
                 break
 
-    # -- arbre -----------------------------------------------------------
+    # -- tree -----------------------------------------------------------
     def _sort_key(self, c: dict):
         if self.sort_mode == "points":
             return (-int(c.get("value", 0) or 0), c.get("name", ""))
@@ -699,11 +769,11 @@ class Flagship(App):
             for cat in sorted(cats):
                 items = sorted(cats[cat], key=self._sort_key)
                 n_solved = sum(1 for i in items if i.get("solved"))
-                # conserve l'état plié/déplié mémorisé pour cette catégorie
+                # keep the remembered collapsed/expanded state for this category
                 node = tree.root.add(f"[b]{cat}[/b] ({n_solved}/{len(items)})",
                                      data={"_cat": cat}, expand=cat not in self.collapsed_cats)
                 for c in items:
-                    # colonne 1 = téléchargé (carré/boîte) · colonne 2 = résolu (cercle)
+                    # column 1 = downloaded (square/box) · column 2 = solved (circle)
                     mark = "[b green]●[/b green]" if c.get("solved") else "[grey42]○[/grey42]"
                     dlm = "[b cyan]▣[/b cyan]" if c.get("downloaded") else "[grey42]▢[/grey42]"
                     slv = c.get("solves")
@@ -726,10 +796,10 @@ class Flagship(App):
         self.collapsed_cats.discard(d["_cat"])
         self._save_ui_state()
 
-    # -- sélection -> détail ---------------------------------------------
+    # -- selection -> detail ---------------------------------------------
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         data = event.node.data
-        if not data or "_cat" in data:  # ignore les nœuds de catégorie
+        if not data or "_cat" in data:  # ignore category nodes
             return
         self.selected = data
         self._render_detail(data, loading=True)
@@ -742,7 +812,7 @@ class Flagship(App):
             try:
                 detail = self.client.challenge(cid)
             except CTFdError as e:
-                self.call_from_thread(self.notify, f"Détail indisponible : {e}", severity="warning")
+                self.call_from_thread(self.notify, f"Details unavailable: {e}", severity="warning")
                 return
             self._detail_cache[cid] = detail
         if cid not in self._fb_cache:
@@ -752,16 +822,16 @@ class Flagship(App):
 
     def _render_detail(self, c: dict, loading: bool = False) -> None:
         files = [Path(f.split("?")[0]).name for f in (c.get("files") or [])]
-        status = "● résolu" if c.get("solved") else "○ non résolu"
+        status = "● solved" if c.get("solved") else "○ unsolved"
         cid = int(c.get("id", -1))
-        meta = f"**Catégorie** : {c.get('category','?')}  ·  **Points** : {c.get('value','?')}  ·  **{status}**"
+        meta = f"**Category**: {c.get('category','?')}  ·  **Points**: {c.get('value','?')}  ·  **{status}**"
         if c.get("solves") is not None:
-            meta += f"  ·  **Solves** : {c['solves']}"
+            meta += f"  ·  **Solves**: {c['solves']}"
         fb = self._fb_cache.get(cid)
         md = [f"# {c.get('name','?')}", meta]
         if fb:
-            md.append(f"🩸 **First blood** : {fb}")
-        md.append(f"**Connexion** : `{c.get('connection_info') or 'aucune'}`")
+            md.append(f"🩸 **First blood**: {fb}")
+        md.append(f"**Connection**: `{c.get('connection_info') or 'none'}`")
         prereqs = store.prereq_ids(c)
         if prereqs:
             by_id = {int(x["id"]): x for x in self.challenges if x.get("id") is not None}
@@ -772,30 +842,30 @@ class Flagship(App):
                 ok = bool(pc and pc.get("solved"))
                 all_ok = all_ok and ok
                 parts.append(f"{'✔' if ok else '🔒'} {name}")
-            lock = "déverrouillé" if all_ok else "🔒 verrouillé"
-            md.append(f"**Prérequis** ({lock}) : " + ", ".join(parts))
+            lock = "unlocked" if all_ok else "🔒 locked"
+            md.append(f"**Prerequisites** ({lock}): " + ", ".join(parts))
         if c.get("path"):
-            md.append(f"**Dossier** : `{c['path']}`  ·  {'▣ téléchargé' if c.get('downloaded') else '▢ non téléchargé (touche d)'}")
+            md.append(f"**Folder**: `{c['path']}`  ·  {'▣ downloaded' if c.get('downloaded') else '▢ not downloaded (press d)'}")
         if files:
-            md.append("**Fichiers** (→ work/) : " + ", ".join(f"`{f}`" for f in files))
+            md.append("**Files** (→ work/): " + ", ".join(f"`{f}`" for f in files))
         ext = store.extract_links(c.get("description"))
         if ext:
-            md.append("**Liens externes** : " + ", ".join(f"[{store.classify_link(u)}] {u}" for u in ext))
+            md.append("**External links**: " + ", ".join(f"[{store.classify_link(u)}] {u}" for u in ext))
         hints = c.get("hints") or []
         if hints:
             hl = []
             for h in hints:
-                tag = "gratuit" if h.get("cost", 0) == 0 else f"{h.get('cost')} pts"
+                tag = "free" if h.get("cost", 0) == 0 else f"{h.get('cost')} pts"
                 if h.get("content"):
-                    hl.append(f"- **#{h.get('id')}** (débloqué, {tag}) : {h['content']}")
+                    hl.append(f"- **#{h.get('id')}** (unlocked, {tag}): {h['content']}")
                 else:
-                    hl.append(f"- **#{h.get('id')}** (verrouillé, {tag}) : `u` pour débloquer")
-            md.append("**Indices**\n" + "\n".join(hl))
+                    hl.append(f"- **#{h.get('id')}** (locked, {tag}): press `u` to unlock")
+            md.append("**Hints**\n" + "\n".join(hl))
         md.append("\n---\n")
-        md.append("*Chargement…*" if loading else (store.clean_desc(c.get("description")) or "*(pas de description)*"))
+        md.append("*Loading…*" if loading else (store.clean_desc(c.get("description")) or "*(no description)*"))
         self.query_one("#detail", Markdown).update("\n\n".join(md))
 
-    # -- recherche / filtre / tri ---------------------------------------
+    # -- search / filter / sort ---------------------------------------
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "search":
             self.search = event.value.strip().lower()
@@ -805,7 +875,7 @@ class Flagship(App):
         self.query_one("#search", Input).focus()
 
     def action_unfocus(self) -> None:
-        """Échap : quitter un champ de saisie, redonner le focus à la liste des challenges."""
+        """Esc: leave an input field, give focus back to the challenge list."""
         self.set_focus(self.query_one("#tree", Tree))
 
     def action_cycle_filter(self) -> None:
@@ -823,43 +893,43 @@ class Flagship(App):
         except ValueError:
             i = -1
         self.theme = names[(i + 1) % len(names)]
-        self._emit(f"🎨 Thème : {self.theme}", "information", 3)
+        self._emit(f"🎨 Theme: {self.theme}", "information", 3)
         self._save_ui_state()
 
     def _apply_view(self) -> None:
         self._rebuild_tree()
         solved = sum(1 for c in self.challenges if c.get("solved"))
         dl = sum(1 for c in self.challenges if c.get("downloaded"))
-        self.sub_title = (f"{solved}/{len(self.challenges)} résolus · {dl} téléchargés · "
-                          f"filtre : {FILTER_LABEL[self.filter_mode]} · tri : {SORT_LABEL[self.sort_mode]}")
+        self.sub_title = (f"{solved}/{len(self.challenges)} solved · {dl} downloaded · "
+                          f"filter: {FILTER_LABEL[self.filter_mode]} · sort: {SORT_LABEL[self.sort_mode]}")
         self._save_ui_state()
 
     def action_refresh(self) -> None:
-        self.notify("Actualisation…", timeout=2)
+        self.notify("Refreshing…", timeout=2)
         self.list_worker()
         self.scoreboard_worker()
         self.me_worker()
 
     def action_focus_flag(self) -> None:
-        try:  # le champ flag est dans l'onglet Challenges : s'y placer d'abord
+        try:  # the flag field lives in the Challenges tab: switch to it first
             self.query_one(TabbedContent).active = "tab-chal"
         except Exception:  # noqa: BLE001
             pass
         self.query_one("#flag", Input).focus()
 
-    # -- téléchargement / sync ------------------------------------------
+    # -- download / sync ------------------------------------------
     def action_download(self) -> None:
         if not self.selected:
-            self.notify("Sélectionne d'abord un challenge.", severity="warning")
+            self.notify("Select a challenge first.", severity="warning")
             return
-        # chemin unique auto-réparateur : (re)crée desc.txt si besoin + complète les fichiers
-        self.notify(f"Téléchargement / mise à jour de {self.selected.get('name','?')}…", timeout=2)
+        # single self-healing path: (re)creates desc.txt if needed + completes the files
+        self.notify(f"Downloading / updating {self.selected.get('name','?')}…", timeout=2)
         self.download_worker(dict(self.selected))
 
     def action_sync_all(self) -> None:
         n = len(self.challenges)
-        q = (f"Tout synchroniser : télécharger les {n} challenges (parallèle) ?\n"
-             f"Cela peut être long et volumineux.")
+        q = (f"Sync all: download all {n} challenges (in parallel)?\n"
+             f"This may take a while and use a lot of disk space.")
 
         def cb(ok):
             if ok:
@@ -868,7 +938,7 @@ class Flagship(App):
         self.push_screen(ConfirmScreen(q), cb)
 
     def _current_category(self) -> str | None:
-        """Catégorie sous le curseur (nœud de catégorie ou challenge), sinon celle du sélectionné."""
+        """Category under the cursor (category node or challenge), otherwise the selected one's."""
         try:
             node = self.query_one("#tree", Tree).cursor_node
         except Exception:  # noqa: BLE001
@@ -884,11 +954,11 @@ class Flagship(App):
     def action_download_category(self) -> None:
         cat = self._current_category()
         if not cat:
-            self.notify("Place-toi sur une catégorie ou un challenge.", severity="warning")
+            self.notify("Move to a category or a challenge.", severity="warning")
             return
         subset = [c for c in self.challenges if c.get("category") == cat]
-        q = (f"Télécharger les {len(subset)} challenges de « {cat} » (parallèle) ?\n"
-             f"Les fichiers déjà présents sont sautés.")
+        q = (f"Download the {len(subset)} challenges of \"{cat}\" (in parallel)?\n"
+             f"Files already present are skipped.")
 
         def cb(ok):
             if ok:
@@ -896,7 +966,7 @@ class Flagship(App):
 
         self.push_screen(ConfirmScreen(q), cb)
 
-    @work(thread=True, exclusive=True, group="syncall")  # même groupe que « Tout sync » : pas de collision
+    @work(thread=True, exclusive=True, group="syncall")  # same group as "Sync all": no collision
     def download_category_worker(self, cat: str) -> None:
         subset = [c for c in self.challenges if c.get("category") == cat]
         if not subset:
@@ -907,65 +977,65 @@ class Flagship(App):
         def progress(done, total):
             self.call_from_thread(self._set_progress, done, total)
 
-        self.call_from_thread(self._emit, f"⏳ Téléchargement de « {cat} »…", "information", 3)
+        self.call_from_thread(self._emit, f"⏳ Downloading \"{cat}\"…", "information", 3)
         try:
             _, events = store.download_subset(
                 self.client, self.cfg.base_dir, subset, self.cfg.watch_changes,
                 self.cfg.auto_unlock_free_hints, self.cfg.download_workers, progress)
         except CTFdError as e:
-            self.call_from_thread(self._emit, f"Catégorie KO : {e}", "error", 6)
+            self.call_from_thread(self._emit, f"Category download failed: {e}", "error", 6)
             return
         finally:
             self._syncing = False
             self.call_from_thread(self._show_progress, False)
         n = sum(1 for c in subset if c.get("downloaded"))
         self.call_from_thread(self._apply_challenges, self.challenges, events)
-        self.call_from_thread(self._emit, f"✅ « {cat} » : {n}/{len(subset)} téléchargés.", "information", 6)
+        self.call_from_thread(self._emit, f"✅ \"{cat}\": {n}/{len(subset)} downloaded.", "information", 6)
 
     def action_export_progress(self) -> None:
         if not self.challenges:
-            self.notify("Rien à exporter.", severity="warning")
+            self.notify("Nothing to export.", severity="warning")
             return
         try:
             p = store.write_progress(self.cfg.base_dir, self.challenges, self.cfg.ctf_name)
         except OSError as e:
-            self._emit(f"Export PROGRESS KO : {e}", "error")
+            self._emit(f"PROGRESS export failed: {e}", "error")
             return
-        self._emit(f"📄 Progression exportée : {p}", "information", 5)
+        self._emit(f"📄 Progress exported: {p}", "information", 5)
 
-    # -- copier connexion / notes ---------------------------------------
+    # -- copy connection / notes ---------------------------------------
     def action_copy_conn(self) -> None:
         if not self.selected:
-            self.notify("Sélectionne d'abord un challenge.", severity="warning")
+            self.notify("Select a challenge first.", severity="warning")
             return
         detail = self._detail_cache.get(int(self.selected["id"]), self.selected)
         text = detail.get("connection_info") or self.selected.get("path") or self.selected.get("name", "")
         try:
             self.copy_to_clipboard(text)
-            self.notify(f"Copié : {text}", timeout=4)
+            self.notify(f"Copied: {text}", timeout=4)
         except Exception:  # noqa: BLE001
-            self.notify(f"À copier : {text}", timeout=6)
+            self.notify(f"Copy this: {text}", timeout=6)
 
     def action_open_folder(self) -> None:
-        """Ouvre le dossier du challenge dans le gestionnaire de fichiers du système."""
+        """Open the challenge folder in the system file manager."""
         if not self.selected:
-            self.notify("Sélectionne d'abord un challenge.", severity="warning")
+            self.notify("Select a challenge first.", severity="warning")
             return
         path = self.selected.get("path")
         if not path or not Path(path).exists():
-            self.notify("Dossier absent : télécharge d'abord (touche d).", severity="warning")
+            self.notify("Folder missing: download first (press d).", severity="warning")
             return
         opener = {"darwin": "open", "win32": "explorer"}.get(sys.platform, "xdg-open")
         try:
             subprocess.Popen([opener, path],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            self.notify(f"📂 Ouverture : {path}", timeout=3)
+            self.notify(f"📂 Opening: {path}", timeout=3)
         except Exception as e:  # noqa: BLE001
-            self.notify(f"Ouverture impossible ({e}) : {path}", severity="warning", timeout=6)
+            self.notify(f"Cannot open ({e}): {path}", severity="warning", timeout=6)
 
     def action_edit_notes(self) -> None:
         if not self.selected:
-            self.notify("Sélectionne d'abord un challenge.", severity="warning")
+            self.notify("Select a challenge first.", severity="warning")
             return
         d = Path(self.selected.get("path") or store.challenge_dir(
             self.cfg.base_dir, self.selected.get("category", ""), self.selected.get("name", "")))
@@ -974,17 +1044,17 @@ class Flagship(App):
         if not notes.exists():
             notes.write_text(
                 f"# {self.selected.get('name','?')}\n"
-                f"**Catégorie :** {self.selected.get('category','?')} | "
-                f"**Points :** {self.selected.get('value','?')}\n\n## Notes\n\n", encoding="utf-8")
+                f"**Category:** {self.selected.get('category','?')} | "
+                f"**Points:** {self.selected.get('value','?')}\n\n## Notes\n\n", encoding="utf-8")
         editor = os.environ.get("EDITOR") or os.environ.get("VISUAL") or "nano"
         try:
             with self.suspend():
                 subprocess.call([editor, str(notes)])
-            self._emit(f"📝 Notes éditées : {notes}", "information", 4)
+            self._emit(f"📝 Notes edited: {notes}", "information", 4)
         except Exception as e:  # noqa: BLE001
-            self.notify(f"Éditeur indisponible ({e}). Fichier : {notes}", severity="warning", timeout=6)
+            self.notify(f"Editor unavailable ({e}). File: {notes}", severity="warning", timeout=6)
 
-    # -- soumission ------------------------------------------------------
+    # -- submission ------------------------------------------------------
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "flag":
             return
@@ -992,11 +1062,11 @@ class Flagship(App):
         if not flag:
             return
         if not self.selected:
-            self.notify("Sélectionne d'abord un challenge.", severity="warning")
+            self.notify("Select a challenge first.", severity="warning")
             return
         cid = int(self.selected["id"])
         if store.was_attempted(self.cfg.base_dir, cid, flag):
-            self._emit(f"⚠️ Flag déjà tenté (incorrect), non resoumis : {flag}", "warning", 6)
+            self._emit(f"⚠️ Flag already tried (incorrect), not resubmitted: {flag}", "warning", 6)
             event.input.value = ""
             return
         self.submit_worker(cid, flag, self.selected.get("path", ""))
@@ -1007,7 +1077,7 @@ class Flagship(App):
         try:
             status, message = self.client.submit(cid, flag)
         except CTFdError as e:
-            self.call_from_thread(self._emit, f"Soumission KO : {e}", "error")
+            self.call_from_thread(self._emit, f"Submission failed: {e}", "error")
             return
         if status == "correct":
             store.record_attempt(self.cfg.base_dir, cid, flag, True, path)
@@ -1017,7 +1087,7 @@ class Flagship(App):
             self.scoreboard_worker()
             self.me_worker()
         elif status == "already_solved":
-            self.call_from_thread(self._emit, "Déjà résolu.", "information")
+            self.call_from_thread(self._emit, "Already solved.", "information")
         else:
             store.record_attempt(self.cfg.base_dir, cid, flag, False, path)
             self.call_from_thread(self._emit, f"✘ {status}: {message}".strip(), "warning", 5)
@@ -1026,24 +1096,24 @@ class Flagship(App):
         for c in self.challenges:
             if int(c.get("id", -1)) == cid:
                 c["solved"] = True
-        self._emit(f"✔ Correct ! {message}".strip(), "information", 6)
+        self._emit(f"✔ Correct! {message}".strip(), "information", 6)
         self._apply_challenges(self.challenges)
 
-    # -- déblocage d'indice ---------------------------------------------
+    # -- hint unlock ---------------------------------------------
     def action_unlock_hint(self) -> None:
         if not self.selected:
-            self.notify("Sélectionne d'abord un challenge.", severity="warning")
+            self.notify("Select a challenge first.", severity="warning")
             return
         detail = self._detail_cache.get(int(self.selected["id"]), self.selected)
         locked = [h for h in (detail.get("hints") or []) if not h.get("content")]
         if not locked:
-            self.notify("Aucun indice verrouillé.", severity="information")
+            self.notify("No locked hints.", severity="information")
             return
         h = min(locked, key=lambda x: x.get("cost", 0))
         cost = h.get("cost", 0)
-        tag = "gratuit" if cost == 0 else f"{cost} pts"
-        q = (f"Débloquer l'indice #{h.get('id')} ({tag}) de « {self.selected.get('name','?')} » ?\n"
-             f"⚠️ Un indice payant réduit ton score.")
+        tag = "free" if cost == 0 else f"{cost} pts"
+        q = (f"Unlock hint #{h.get('id')} ({tag}) of \"{self.selected.get('name','?')}\"?\n"
+             f"⚠️ A paid hint lowers your score.")
 
         def cb(ok):
             if ok:
@@ -1057,10 +1127,10 @@ class Flagship(App):
             self.client.unlock_hint(hint_id)
             detail = self.client.challenge(cid)
         except CTFdError as e:
-            self.call_from_thread(self._emit, f"Déblocage KO : {e}", "error")
+            self.call_from_thread(self._emit, f"Unlock failed: {e}", "error")
             return
         self._detail_cache[cid] = detail
-        self.call_from_thread(self._emit, f"💡 Indice #{hint_id} débloqué.", "information", 6)
+        self.call_from_thread(self._emit, f"💡 Hint #{hint_id} unlocked.", "information", 6)
         if self.selected and int(self.selected["id"]) == cid:
             self.call_from_thread(self._render_detail, {**self.selected, **detail})
 
@@ -1072,7 +1142,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg = Config.load(cfg_path)
     except Exception as e:  # noqa: BLE001
         print(f"[flagship] config: {e}", file=sys.stderr)
-        print("Usage: python -m flagship [chemin/config.sh]", file=sys.stderr)
+        print("Usage: python -m flagship [path/config.sh]", file=sys.stderr)
         return 2
     Flagship(cfg).run()
     return 0

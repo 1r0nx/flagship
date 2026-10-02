@@ -20,6 +20,10 @@ terminal.
 └ d Dl  D Sync  w Folder  u Hint  / Search  f Filter  o Sort  q Quit ──────┘
 ```
 
+> **Interface language**: the whole Flagship interface (labels, notifications, error messages,
+> confirmation dialogs) is in **English**, as are the generated files (`desc.txt`, `downloads.txt`,
+> `notes.md`, `PROGRESS_flagship.md`).
+
 A legend at the top of the left column recalls each line's markers: `▣`/`▢` for downloaded files,
 `●`/`○` for solved state, and `N pt · N solves` for points and solve count. Two distinct shapes
 (square for files, circle for status) plus colour make the state readable at a glance, with
@@ -74,6 +78,11 @@ shows the current score, rank and a **countdown** to the end of the CTF.
 On submission, **incorrect** flags already tried are remembered: resubmitting an identical flag is
 blocked (with a warning) so a submission attempt is not wasted. Every attempt is also logged to
 `attempts.log` at the root of the challenge folder (handy for a writeup).
+
+**Resizable panes**: a vertical bar `┃` separates the challenge list (left) from the detail
+panel (right). Dragging it with the mouse widens or narrows either pane (minimum widths are
+enforced); a double-click restores the default width (42%). The chosen width is remembered (as a
+percentage) in `.flagship/state.json` (`tree_width`).
 
 **Scoreboard** tab: ranking with position, team or player, and score. The user's row is highlighted
 and the cursor jumps to it.
@@ -242,6 +251,7 @@ from `config.sh.example`.
 | `e` | edit the challenge notes (`notes.md`, via `$EDITOR`) |
 | `p` | export a summary to `PROGRESS_flagship.md` (never touches `PROGRESS.md`) |
 | `Esc` | leave an input field (search or flag) and return to the list |
+| mouse: drag `┃` | resize the list / detail panes (double-click: default width) |
 | `Tab` / `Shift+Tab` | move focus to the next or previous element |
 | `q` | quit |
 
@@ -297,7 +307,7 @@ without crashing the application.
 
 Notification toasts are also written to `<base>/.flagship/notifications.log`, viewable in the
 **Notifications** tab. The
-UI state (filter, sort, collapsed or expanded categories, last selection) is kept in
+UI state (filter, sort, collapsed or expanded categories, last selection, pane width) is kept in
 `<base>/.flagship/state.json`, then restored across tree rebuilds (download, refresh) and when the
 TUI is reopened.
 

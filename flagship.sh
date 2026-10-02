@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Lanceur Flagship : flagship.sh [chemin/vers/config.sh]
-# (défaut : ./config.sh à côté du dossier flagship)
+# Flagship launcher: flagship.sh [path/to/config.sh]
+# (default: ./config.sh next to the flagship folder)
 set -e
 CFG="${1:-config.sh}"
-# résout le chemin du config en ABSOLU avant de changer de dossier
+# resolve the config path to an ABSOLUTE one before changing directory
 CFG="$(cd "$(dirname "$CFG")" && pwd)/$(basename "$CFG")"
-# se place dans le dossier de l'outil pour que `python -m flagship` trouve le package
+# move into the tool folder so that `python -m flagship` finds the package
 cd "$(dirname "$0")"
 exec python3 -m flagship "$CFG"

@@ -9,16 +9,21 @@ les challenges dans une arborescence de dossiers organisée et permet de les par
 énoncés et de soumettre les flags sans quitter le terminal.
 
 ```
-┌ Flagship · MonCTF · score 8270 (#3) · ⏳ fin 2h11 · 12/40 résolus ────────┐
-│▣ ▢ fichiers  ● ○ résolu        │ # 2 - Return                             │
-│Pwn (3/8)                       │ Catégorie : Pwn · Points : 200 · ○       │
-│ ▣ ●  0 - Overflow 100·12 solves│ Prérequis (déverrouillé) : ✔ 0 - Overflow│
-│ ▣ ○  2 - Return   200·5 solves │ Connexion : nc chal... 1389              │
+┌ Flagship · MyCTF · score 8270 (#3) · ⏳ ends in 2h11 · 12/40 solved ──────┐
+│▣ ▢ files  ● ○ solved           │ # 2 - Return                             │
+│Pwn (3/8)                       │ Category: Pwn · Points: 200 · ○ unsolved │
+│ ▣ ●  0 - Overflow 100·12 solves│ Prerequisites (unlocked): ✔ 0 - Overflow │
+│ ▣ ○  2 - Return   200·5 solves │ Connection: nc chal... 1389              │
 │Crypto (5/9)                    │ Can you pwn this problem? ...            │
 │ ▢ ●  First XOR    50·30 solves ├──────────────────────────────────────────┤
 │ ▢ ○  RSA          150·5 solves │ 🚩                                       │
-└ d Dl  D Sync  w Dossier  u Indice  / Rech.  f Filtre  o Tri  q Quit ──────┘
+└ d Download  D Sync all  w Folder  u Hint  / Search  f Filter  o Sort  q Quit ┘
 ```
+
+> **Langue de l'interface** : l'interface de Flagship (libellés, notifications, messages d'erreur,
+> boîtes de confirmation) est **en anglais**, de même que les fichiers générés (`desc.txt`,
+> `downloads.txt`, `notes.md`, `PROGRESS_flagship.md`). Cette documentation française en reprend
+> donc les libellés anglais tels qu'ils s'affichent à l'écran.
 
 Les marqueurs de chaque ligne sont rappelés par une légende en haut de la colonne de gauche :
 `▣`/`▢` pour les fichiers téléchargés, `●`/`○` pour l'état résolu, et `N pt · N solves` pour les
@@ -80,17 +85,22 @@ sans jamais toucher au `PROGRESS.md` de l'utilisateur). L'en-tête affiche le sc
 est bloqué (avec un avertissement) afin de ne pas gaspiller de tentative. Chaque tentative est aussi
 journalisée dans `attempts.log` à la racine du dossier du challenge (utile pour un writeup).
 
+**Panneaux redimensionnables** : une barre verticale `┃` sépare la liste des challenges (à
+gauche) du détail (à droite). Un glisser à la souris la déplace pour élargir l'un ou l'autre
+panneau (largeurs minimales respectées) ; un double-clic restaure la largeur par défaut (42 %). La
+largeur choisie est mémorisée (en pourcentage) dans `.flagship/state.json` (`tree_width`).
+
 Onglet **Scoreboard** : classement avec position, équipe ou joueur, et score. La ligne de
 l'utilisateur est surlignée et le curseur s'y positionne.
 
 Onglet **Stats** : récapitulatif de la progression : score et rang, nombre de résolus et points
 gagnés sur le total, challenges téléchargés, puis un tableau par catégorie (résolus, points,
 téléchargés) et des barres de progression par catégorie. Il se met à jour automatiquement. En
-**mode équipe**, une section **« Membres de l'équipe »** s'ajoute : ton rang et ton score
+**mode équipe**, une section **« Team members »** s'ajoute : ton rang et ton score
 individuels, puis un **tableau de tous les membres** (résolus et points de chacun, calculés depuis
-les solves de l'équipe), trié par points, ta ligne étant surlignée et marquée « (toi) ». Chaque
+les solves de l'équipe), trié par points, ta ligne étant surlignée et marquée « (you) ». Chaque
 **pseudo est cliquable** : un clic ouvre une fenêtre détaillant les stats de ce membre, avec ses
-sections « Par catégorie » et « Progression par catégorie » (classées par points) pour voir où
+sections « By category » et « Progress by category » (classées par points) pour voir où
 chacun a le plus contribué.
 
 Onglet **Notifications** : l'historique des notifications (les plus récentes en haut), mis à jour en
@@ -251,6 +261,7 @@ doit être recréé à partir de `config.sh.example`.
 | `e` | éditer les notes du challenge (`notes.md`, via `$EDITOR`) |
 | `p` | exporter un récapitulatif dans `PROGRESS_flagship.md` (sans toucher à `PROGRESS.md`) |
 | `Échap` | quitter un champ de saisie (recherche ou flag) et revenir sur la liste |
+| souris : glisser `┃` | redimensionner la liste / le détail (double-clic : largeur par défaut) |
 | `Tab` / `Maj+Tab` | déplacer le focus vers l'élément suivant ou précédent |
 | `q` | quitter |
 
@@ -306,7 +317,7 @@ sans interrompre l'application.
 - `write_flag()` écrit `flag.txt`, jamais par-dessus un fichier existant.
 
 Les toasts de notification sont aussi écrits dans `<base>/.flagship/notifications.log`, et consultables
-dans l'onglet **Notifications**. L'état d'interface (filtre, tri, catégories pliées ou dépliées, dernière sélection) est
+dans l'onglet **Notifications**. L'état d'interface (filtre, tri, catégories pliées ou dépliées, dernière sélection, largeur des panneaux) est
 conservé dans `<base>/.flagship/state.json`, puis restauré aux reconstructions de l'arbre
 (téléchargement, rafraîchissement) et à la réouverture de la TUI.
 
@@ -322,8 +333,8 @@ conservé dans `<base>/.flagship/state.json`, puis restauré aux reconstructions
 Les téléchargements n'ont lieu qu'à la demande (`d` sur un challenge, ou `D` pour tout). Lorsqu'un
 challenge est téléchargé, Flagship range ses fichiers dans `work/` et écrit un rapport
 `downloads.txt` (valeurs `ok`, `skip`, `manual`, `error`) à la racine du challenge. Dans tous les
-cas, les liens figurent dans `desc.txt` (section « Fichiers (plateforme) » avec l'URL complète, et
-section « Liens externes »).
+cas, les liens figurent dans `desc.txt` (section « Files (platform) » avec l'URL complète, et
+section « External links »).
 
 | Source | Comportement |
 |--------|--------------|

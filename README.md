@@ -29,8 +29,9 @@ Par défaut, le lancement **liste** seulement les challenges (aucun télécharge
 launch just **lists** challenges (no download).
 
 Raccourcis / Shortcuts : `↑↓`·Enter · `d` télécharger/download · `D` tout sync/sync all ·
-`/` search · `r` refresh · `f` filtre · `o` tri/sort · `s` flag · `u` indice/hint ·
-`c` copier/copy · `w` dossier/folder · `e` notes · `p` progress · `q` quit.
+`/` search · `r` refresh · `f` filter · `o` sort · `s` flag · `u` hint ·
+`c` copy · `w` folder · `e` notes · `p` progress · `q` quit · drag `┃` to resize panes.
+Interface language: English. / Interface en anglais.
 Onglets / Tabs : Challenges · Scoreboard · Stats · Notifications.
 
 > Le fichier `config.sh` contient le token : il est git-ignoré. / holds the token: git-ignored.
