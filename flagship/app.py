@@ -326,6 +326,12 @@ class Flagship(App):
        notifications) already has its own scrollbar, so a 1-row layout mismatch must never
        spawn a second, screen-wide scrollbar next to a pane's real one */
     Screen { overflow-y: hidden; }
+    /* thinner scrollbars everywhere (tree, detail, scoreboard, stats, notifications, member
+       popup) : Textual's default is 2 cells tall/wide, 1 is plenty and less visually heavy */
+    VerticalScroll, Tree, DataTable {
+        scrollbar-size-vertical: 1;
+        scrollbar-size-horizontal: 1;
+    }
     #treecol { width: 42%; }
     #legend_icons { height: 1; padding: 0 1; background: $panel; color: $text-muted; }
     #legend_row { height: 1; background: $panel; }
