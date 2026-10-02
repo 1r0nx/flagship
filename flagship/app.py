@@ -203,8 +203,8 @@ class Splitter(Widget):
             self.app._refresh_detail_width()
 
 
-FILTERS = ("all", "unsolved", "solved")
-FILTER_LABEL = {"all": "all", "unsolved": "unsolved", "solved": "solved"}
+FILTERS = ("all", "unsolved", "solved", "bookmarked")
+FILTER_LABEL = {"all": "all", "unsolved": "unsolved", "solved": "solved", "bookmarked": "bookmarked"}
 SORTS = ("category", "points", "solves", "fewest", "name", "id", "downloaded", "unsolved")
 SORT_LABEL = {
     "category": "category", "points": "points", "solves": "solves", "fewest": "fewest solves",
@@ -363,6 +363,7 @@ class Flagship(App):
         ("slash", "focus_search", "Search"),
         ("s", "focus_flag", "Submit"),
         ("u", "unlock_hint", "Hint"),
+        ("b", "toggle_bookmark", "Bookmark"),
         ("c", "copy_conn", "Copy"),
         ("w", "open_folder", "Folder"),
         ("e", "edit_notes", "Notes"),
@@ -382,6 +383,7 @@ class Flagship(App):
         self.search = ""
         self._session_solved: set[int] = set()  # solved during this session: stay visible under "unsolved"
         self.collapsed_cats: set[str] = set()  # collapsed categories (default = expanded)
+        self.bookmarked: set[int] = set()  # challenge ids pinned with `b`, persisted
         self._building = False                  # re-entrancy guard while the tree is being rebuilt
         self.me: dict = {}
         self._personal: dict = {}             # individual stats (team mode only)
@@ -460,6 +462,7 @@ class Flagship(App):
             s = json.loads(self._state_path.read_text(encoding="utf-8"))
             self.sort_mode = s.get("sort", self.sort_mode)
             self.collapsed_cats = set(s.get("collapsed", []))
+            self.bookmarked = set(s.get("bookmarked", []))
             self._last_selected_id = s.get("selected")
             self._pref_theme = s.get("theme")
             self._tree_width = s.get("tree_width")
@@ -487,6 +490,7 @@ class Flagship(App):
                 "sort": self.sort_mode,
                 "selected": (self.selected or {}).get("id"),
                 "collapsed": sorted(self.collapsed_cats),
+                "bookmarked": sorted(self.bookmarked),
                 "theme": self.theme,
                 "tree_width": self._tree_width_str(),
             }), encoding="utf-8")
@@ -863,12 +867,25 @@ class Flagship(App):
         return (int(c.get("value", 0) or 0), c.get("name", ""))
 
     def _passes_filter(self, c: dict) -> bool:
-        """Status filter (`f`): all / unsolved / solved."""
+        """Status filter (`f`): all / unsolved / solved / bookmarked."""
         if self.filter_mode == "unsolved":
             return not c.get("solved") or int(c.get("id", -1)) in self._session_solved
         if self.filter_mode == "solved":
             return bool(c.get("solved"))
+        if self.filter_mode == "bookmarked":
+            return int(c.get("id", -1)) in self.bookmarked
         return True
+
+    def _matches_search(self, c: dict) -> bool:
+        """Name, category, and the description if its detail happens to be cached already
+        (never fetched just for this: typing in the search box must never trigger network
+        calls)."""
+        if not self.search:
+            return True
+        cid = int(c.get("id", -1))
+        desc = self._detail_cache.get(cid, {}).get("description") or ""
+        haystack = f"{c.get('name', '')} {c.get('category', '')} {desc}".lower()
+        return self.search in haystack
 
     def _rebuild_tree(self) -> None:
         tree = self.query_one("#tree", Tree)
@@ -879,7 +896,7 @@ class Flagship(App):
             for c in self.challenges:
                 if not self._passes_filter(c):
                     continue
-                if self.search and self.search not in c.get("name", "").lower():
+                if not self._matches_search(c):
                     continue
                 cats.setdefault(c.get("category", "?"), []).append(c)
             for cat in sorted(cats):
@@ -892,9 +909,10 @@ class Flagship(App):
                     # column 1 = downloaded (square/box) · column 2 = solved (circle)
                     mark = "[b green]●[/b green]" if c.get("solved") else "[grey42]○[/grey42]"
                     dlm = "[b cyan]▣[/b cyan]" if c.get("downloaded") else "[grey42]▢[/grey42]"
+                    star = "[yellow]★[/yellow] " if int(c.get("id", -1)) in self.bookmarked else ""
                     slv = c.get("solves")
                     stail = f"   [dim]{c.get('value','')}pt · {slv} solves[/dim]" if slv is not None else f"   [dim]{c.get('value','')}pt[/dim]"
-                    node.add_leaf(f"{dlm} {mark}  {c.get('name','?')}{stail}", data=c)
+                    node.add_leaf(f"{dlm} {mark}  {star}{c.get('name','?')}{stail}", data=c)
         finally:
             self._building = False
 
@@ -949,6 +967,15 @@ class Flagship(App):
         left = (width - len(title)) // 2
         return "─" * left + title + "─" * (width - len(title) - left)
 
+    def _solver_name(self, cid: int) -> str | None:
+        """Team mode only: which teammate's own solve this challenge is, from the per-member
+        breakdown already fetched for the Stats tab (no extra API call). None in solo mode, or
+        if that data hasn't loaded yet."""
+        for m in self._members:
+            if cid in m.get("solved_ids", []):
+                return m.get("name")
+        return None
+
     def _render_detail(self, c: dict, loading: bool = False) -> None:
         files = [Path(f.split("?")[0]).name for f in (c.get("files") or [])]
         status = "● solved" if c.get("solved") else "○ unsolved"
@@ -958,6 +985,10 @@ class Flagship(App):
             meta += f"  ·  **Solves**: {c['solves']}"
         fb = self._fb_cache.get(cid)
         md = [f"# {c.get('name','?')}", self._rule("INFO"), meta]
+        if c.get("solved") and self.me.get("team"):
+            solver = self._solver_name(cid)
+            if solver:
+                md.append(f"👤 **Solved by**: {solver}")
         if fb:
             md.append(f"🩸 **First blood**: {fb}")
         md.append(f"**Connection**: `{c.get('connection_info') or 'none'}`")
@@ -1057,7 +1088,8 @@ class Flagship(App):
         (always-on, borderless) search field, so searching never costs extra terminal height."""
         self.query_one("#legend_icons", Static).update(
             "[cyan]▣[/cyan] [grey42]▢[/grey42] files    "
-            "[green]●[/green] [grey42]○[/grey42] solved")
+            "[green]●[/green] [grey42]○[/grey42] solved    "
+            "[yellow]★[/yellow] bookmarked (`b`)")
         flt, srt = FILTER_LABEL[self.filter_mode], SORT_LABEL[self.sort_mode]
         mark = "[b yellow]" if self.filter_mode != "all" else "[b]"  # highlight an active filter
         self.query_one("#legend_labels", Static).update(
@@ -1268,6 +1300,21 @@ class Flagship(App):
         self._tree_sig = None  # force a rebuild so the new state shows immediately
         self._emit(f"✔ Correct! {message}".strip(), "information", 6)
         self._apply_challenges(self.challenges)
+
+    # -- bookmark ---------------------------------------------
+    def action_toggle_bookmark(self) -> None:
+        if not self.selected:
+            self.notify("Select a challenge first.", severity="warning")
+            return
+        cid = int(self.selected["id"])
+        if cid in self.bookmarked:
+            self.bookmarked.discard(cid)
+            self.notify(f"☆ Unbookmarked: {self.selected.get('name', '?')}", timeout=3)
+        else:
+            self.bookmarked.add(cid)
+            self.notify(f"★ Bookmarked: {self.selected.get('name', '?')}", timeout=3)
+        self._rebuild_tree()
+        self._save_ui_state()
 
     # -- hint unlock ---------------------------------------------
     def action_unlock_hint(self) -> None:

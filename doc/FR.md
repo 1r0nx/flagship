@@ -18,15 +18,18 @@ résolu, permet de soumettre des flags. Pas besoin de navigateur.
 - Description ou indices modifiés plus tard ? L'ancien `desc.txt` reste, un nouveau
   `desc2.txt` est créé à côté, avec ce qui a changé.
 - Quatre onglets : Challenges, Scoreboard, Stats, Notifications.
-- Recherche (`/`, intégrée à la ligne filtre/tri, ne prend aucune hauteur en plus), filtre
-  (`f`), tri (`o`, 8 modes : points, solves, nom, id...).
+- Recherche (`/`, intégrée à la ligne filtre/tri, ne prend aucune hauteur en plus) : nom,
+  catégorie, et la description si elle est déjà en cache. Filtre (`f`) : all, unsolved, solved,
+  bookmarked. Tri (`o`, 8 modes : points, solves, nom, id...).
+- Favoris (`b`) pour épingler un challenge à reprendre plus tard, marqué `★` dans la liste.
 - Soumission de flag depuis le terminal. Un flag déjà tenté et refusé n'est jamais renvoyé.
 - Déblocage d'indices à la demande, avec confirmation pour les payants.
 - Panneaux redimensionnables : glisser `┃` entre la liste et le détail, double-clic pour
   revenir à la taille par défaut.
 - Panneau de détail découpé en INFO / DESCRIPTION / HINT(S), séparateurs centrés.
 - Onglet Stats : score, rang, résolus, points, téléchargés, first bloods. En mode équipe,
-  détail par membre, clic sur un nom pour voir ses stats.
+  détail par membre, clic sur un nom pour voir ses stats, et le panneau de détail indique qui
+  dans l'équipe a résolu chaque challenge.
 - Marche pareil en solo ou en équipe.
 - CTF fini ou hors-ligne ? Flagship réaffiche la dernière synchro, rien n'est perdu.
 
@@ -114,7 +117,8 @@ flagship ~/ctfs/HeroCTF/config.sh
 | `C` | télécharger la catégorie sous le curseur (confirmation) |
 | `/` | focus sur le champ de recherche en ligne, filtre en direct |
 | `r` | rafraîchir maintenant (liste, scoreboard, rang) |
-| `f` | changer de filtre : all, unsolved, solved |
+| `f` | changer de filtre : all, unsolved, solved, bookmarked |
+| `b` | activer/désactiver le favori sur le challenge sélectionné |
 | `x` | replier toutes les catégories, ou tout déplier |
 | `o` | changer de tri : catégorie, points, solves, moins de solves, nom, id, téléchargés d'abord, non résolus d'abord |
 | `t` | changer de thème (mémorisé) |

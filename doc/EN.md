@@ -18,14 +18,17 @@ submit flags. No browser needed.
 - Description or hints changed later? Old `desc.txt` stays, a new `desc2.txt` is saved next to
   it, with what changed.
 - Four tabs: Challenges, Scoreboard, Stats, Notifications.
-- Search (`/`, lives on the filter/sort line, costs no extra height), filter (`f`), sort (`o`,
-  8 ways: points, solves, name, id...).
+- Search (`/`, lives on the filter/sort line, costs no extra height) matches name, category,
+  and the description if it's already cached. Filter (`f`): all, unsolved, solved, bookmarked.
+  Sort (`o`, 8 ways: points, solves, name, id...).
+- Bookmark a challenge with `b` to pin it for later, shows as a `★` in the list.
 - Submit flags from the terminal. A flag already tried and rejected is never resent.
 - Unlock hints on demand, with confirmation for paid ones.
 - Resizable panes: drag `┃` between the list and the detail, double-click resets it.
 - Detail panel split into INFO / DESCRIPTION / HINT(S), with centered dividers.
 - Stats tab: score, rank, solved, points, downloaded, first bloods. Team mode adds a
-  per-member breakdown, click a name for their stats.
+  per-member breakdown, click a name for their stats, and the detail panel shows who on the
+  team actually solved each one.
 - Works solo or in a team, same keys either way.
 - CTF over or offline? Shows your last synced data, nothing lost.
 
@@ -112,7 +115,8 @@ flagship ~/ctfs/HeroCTF/config.sh
 | `C` | download the category under the cursor (confirmation) |
 | `/` | focus the inline search field, filters live as you type |
 | `r` | refresh now (list, scoreboard, rank) |
-| `f` | cycle filter: all, unsolved, solved |
+| `f` | cycle filter: all, unsolved, solved, bookmarked |
+| `b` | toggle bookmark on the selected challenge |
 | `x` | fold all categories, or unfold them all back |
 | `o` | cycle sort: category, points, solves, fewest solves, name, id, downloaded first, unsolved first |
 | `t` | cycle colour theme (remembered) |
