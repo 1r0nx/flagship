@@ -68,8 +68,8 @@ change.
 (`▣`/`▢`), the status (`●`/`○`), the points and the solve count. The detail panel shows the first blood,
 the connection, the **prerequisites** (challenges to solve first, with their state and a
 locked/unlocked indicator), the files and the hints. The description is viewable without downloading.
-The interface provides a search (`/`), filters (`f`: all, unsolved, solved), a sort (`o`: category,
-points, solves), flag submission (writing `flag.txt` if the flag is correct), download or update
+The interface provides a search (`/`), filters (`f`: all, unsolved, solved; always starts on "all"), a sort (`o`: category, points, solves, fewest solves, name A→Z, CTFd id, downloaded first, unsolved first),
+flag submission (writing `flag.txt` if the flag is correct), download or update
 (`d`), download of a whole **category** (`C`), full synchronization (`D`, parallel, with a progress
 bar), hint unlock (`u`), connection copy (`c`), open folder (`w`), notes editing (`e`, `notes.md`)
 and export to `PROGRESS_flagship.md` (`p`, without ever touching the user's `PROGRESS.md`). The header
@@ -235,14 +235,14 @@ from `config.sh.example`.
 | Key | Action |
 |-----|--------|
 | `↑`/`↓`, Enter | navigate and open a challenge (shows the brief, without downloading) |
-| click the tabs | switch between Challenges and Scoreboard |
+| click the tabs | switch between Challenges, Scoreboard, Stats and Notifications |
 | `d` | download or update the selected challenge (recreates `desc.txt` if missing, completes missing files in `work/`) |
 | `D` | sync all (parallel, progress bar, confirmation) |
 | `C` | download every challenge in the category under the cursor (confirmation) |
 | `/` | focus the search bar |
 | `r` | refresh the list now (plus scoreboard and rank) |
 | `f` | cycle filter (all, unsolved, solved) |
-| `o` | cycle sort (category, points, solves) |
+| `o` | cycle sort: category (points ↑), points (↓), solves (↓), fewest solves, name A→Z, CTFd id, downloaded first, unsolved first |
 | `t` | change colour theme (cycles, persisted) |
 | `s` | focus the flag submission field |
 | `u` | unlock a hint (confirmation) |
@@ -307,7 +307,7 @@ without crashing the application.
 
 Notification toasts are also written to `<base>/.flagship/notifications.log`, viewable in the
 **Notifications** tab. The
-UI state (filter, sort, collapsed or expanded categories, last selection, pane width) is kept in
+UI state (sort, collapsed or expanded categories, last selection, pane width) is kept in
 `<base>/.flagship/state.json`, then restored across tree rebuilds (download, refresh) and when the
 TUI is reopened.
 

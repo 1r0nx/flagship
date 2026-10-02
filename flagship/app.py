@@ -108,6 +108,9 @@ class Splitter(Widget):
     def _left(self) -> Widget:
         return self.screen.query_one(f"#{self._left_id}")
 
+    def _right(self) -> Widget:
+        return self.screen.query_one("#rightcol")
+
     def on_mouse_down(self, event: events.MouseDown) -> None:
         self._dragging = True
         self.add_class("-dragging")
@@ -118,7 +121,7 @@ class Splitter(Widget):
         if not self._dragging:
             return
         left = self._left()
-        total = left.region.width + self.region.width + self.parent.children[-1].region.width
+        total = left.region.width + self.region.width + self._right().region.width
         width = event.screen_x - left.region.x
         width = max(self.MIN_LEFT, min(width, total - self.MIN_RIGHT - self.region.width))
         left.styles.width = width
@@ -140,8 +143,11 @@ class Splitter(Widget):
 
 FILTERS = ("all", "unsolved", "solved")
 FILTER_LABEL = {"all": "all", "unsolved": "unsolved", "solved": "solved"}
-SORTS = ("category", "points", "solves")
-SORT_LABEL = {"category": "category", "points": "points", "solves": "solves"}
+SORTS = ("category", "points", "solves", "fewest", "name", "id", "downloaded", "unsolved")
+SORT_LABEL = {
+    "category": "category", "points": "points", "solves": "solves", "fewest": "fewest solves",
+    "name": "name A→Z", "id": "CTFd id", "downloaded": "downloaded first", "unsolved": "unsolved first",
+}
 
 
 class ConfirmScreen(ModalScreen[bool]):
@@ -234,7 +240,7 @@ class Flagship(App):
     CSS = """
     #search { dock: top; }
     #treecol { width: 42%; }
-    #legend { height: 1; padding: 0 1; background: $panel; color: $text-muted; }
+    #legend { height: auto; min-height: 2; padding: 0 1; background: $panel; color: $text-muted; }
     #tree { height: 1fr; }
     #rightcol { width: 1fr; }
     #detailwrap { height: 1fr; }
@@ -274,6 +280,7 @@ class Flagship(App):
         self.filter_mode = "all"
         self.sort_mode = "category"
         self.search = ""
+        self._session_solved: set[int] = set()  # solved during this session: stay visible under "unsolved"
         self.collapsed_cats: set[str] = set()  # collapsed categories (default = expanded)
         self._building = False                  # re-entrancy guard while the tree is being rebuilt
         self.me: dict = {}
@@ -314,10 +321,8 @@ class Flagship(App):
             with TabPane("Challenges", id="tab-chal"):
                 with Horizontal():
                     with Vertical(id="treecol"):
-                        yield Static(
-                            "[cyan]▣[/cyan] [grey42]▢[/grey42] files    "
-                            "[green]●[/green] [grey42]○[/grey42] solved",
-                            id="legend")
+                        # filled in by _update_legend() on mount (single source of truth for its text)
+                        yield Static(id="legend")
                         yield Tree("Challenges", id="tree")
                     yield Splitter("treecol", id="splitter")
                     with Vertical(id="rightcol"):
@@ -343,6 +348,7 @@ class Flagship(App):
         dt.cursor_type = "row"
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
         self._restore_ui_state()
+        self._update_legend()
         th = getattr(self, "_pref_theme", None) or self.cfg.theme
         if th in self.available_themes:
             self.theme = th
@@ -365,7 +371,6 @@ class Flagship(App):
     def _restore_ui_state(self) -> None:
         try:
             s = json.loads(self._state_path.read_text(encoding="utf-8"))
-            self.filter_mode = s.get("filter", self.filter_mode)
             self.sort_mode = s.get("sort", self.sort_mode)
             self.collapsed_cats = set(s.get("collapsed", []))
             self._last_selected_id = s.get("selected")
@@ -392,7 +397,7 @@ class Flagship(App):
         try:
             self._state_path.parent.mkdir(parents=True, exist_ok=True)
             self._state_path.write_text(json.dumps({
-                "filter": self.filter_mode, "sort": self.sort_mode,
+                "sort": self.sort_mode,
                 "selected": (self.selected or {}).get("id"),
                 "collapsed": sorted(self.collapsed_cats),
                 "theme": self.theme,
@@ -704,6 +709,9 @@ class Flagship(App):
             if c.get("_detail"):
                 self._detail_cache[int(c["id"])] = c["_detail"]
         self.challenges = challenges
+        if not self._first_sync:  # newly solved: keep it visible under the "unsolved" filter
+            self._session_solved |= {int(c["id"]) for c in challenges
+                                     if c.get("solved") and int(c["id"]) not in prev_solved}
         # only rebuild the tree if the display really changes (otherwise the cursor would jump on poll)
         sig = tuple((int(c.get("id", 0)), bool(c.get("solved")), bool(c.get("downloaded")),
                      c.get("solves"), c.get("value"), c.get("name"), c.get("category"))
@@ -714,7 +722,7 @@ class Flagship(App):
         solved = sum(1 for c in challenges if c.get("solved"))
         dl = sum(1 for c in challenges if c.get("downloaded"))
         self.sub_title = (f"{solved}/{len(challenges)} solved · {dl} downloaded · "
-                          f"filter: {FILTER_LABEL[self.filter_mode]} · sort: {SORT_LABEL[self.sort_mode]}")
+                          f"{self._view_summary()}")
         self._render_stats()
 
         for ev in events or []:
@@ -750,7 +758,28 @@ class Flagship(App):
             return (-int(c.get("value", 0) or 0), c.get("name", ""))
         if self.sort_mode == "solves":
             return (-int(c.get("solves", 0) or 0), c.get("name", ""))
+        if self.sort_mode == "fewest":
+            return (int(c.get("solves", 0) or 0), c.get("name", ""))
+        if self.sort_mode == "name":
+            return (c.get("name", "").lower(),)
+        if self.sort_mode == "id":
+            return (int(c.get("id", 0) or 0),)
+        if self.sort_mode == "downloaded":
+            return (not c.get("downloaded"), int(c.get("value", 0) or 0), c.get("name", ""))
+        if self.sort_mode == "unsolved":
+            return (bool(c.get("solved")), int(c.get("value", 0) or 0), c.get("name", ""))
         return (int(c.get("value", 0) or 0), c.get("name", ""))
+
+    def _passes_filter(self, c: dict) -> bool:
+        """Status filter (`f`): all / unsolved / solved."""
+        if self.filter_mode == "unsolved":
+            return not c.get("solved") or int(c.get("id", -1)) in self._session_solved
+        if self.filter_mode == "solved":
+            return bool(c.get("solved"))
+        return True
+
+    def _view_summary(self) -> str:
+        return f"filter: {FILTER_LABEL[self.filter_mode]} · sort: {SORT_LABEL[self.sort_mode]}"
 
     def _rebuild_tree(self) -> None:
         tree = self.query_one("#tree", Tree)
@@ -759,9 +788,7 @@ class Flagship(App):
             tree.clear()
             cats: dict[str, list[dict]] = {}
             for c in self.challenges:
-                if self.filter_mode == "unsolved" and c.get("solved"):
-                    continue
-                if self.filter_mode == "solved" and not c.get("solved"):
+                if not self._passes_filter(c):
                     continue
                 if self.search and self.search not in c.get("name", "").lower():
                     continue
@@ -880,10 +907,13 @@ class Flagship(App):
 
     def action_cycle_filter(self) -> None:
         self.filter_mode = FILTERS[(FILTERS.index(self.filter_mode) + 1) % len(FILTERS)]
+        self._session_solved.clear()
+        self.notify(f"🔍 Filter: {FILTER_LABEL[self.filter_mode]}", timeout=3)
         self._apply_view()
 
     def action_cycle_sort(self) -> None:
         self.sort_mode = SORTS[(SORTS.index(self.sort_mode) + 1) % len(SORTS)]
+        self.notify(f"↕ Sort: {SORT_LABEL[self.sort_mode]}", timeout=3)
         self._apply_view()
 
     def action_cycle_theme(self) -> None:
@@ -896,12 +926,22 @@ class Flagship(App):
         self._emit(f"🎨 Theme: {self.theme}", "information", 3)
         self._save_ui_state()
 
+    def _update_legend(self) -> None:
+        """Always-visible reminder of the active filter and sort (second legend line)."""
+        flt, srt = FILTER_LABEL[self.filter_mode], SORT_LABEL[self.sort_mode]
+        mark = "[b yellow]" if self.filter_mode != "all" else "[b]"  # highlight an active filter
+        self.query_one("#legend", Static).update(
+            "[cyan]▣[/cyan] [grey42]▢[/grey42] files    "
+            "[green]●[/green] [grey42]○[/grey42] solved\n"
+            f"filter: {mark}{flt}[/]    sort: [b]{srt}[/b]")
+
     def _apply_view(self) -> None:
+        self._update_legend()
         self._rebuild_tree()
         solved = sum(1 for c in self.challenges if c.get("solved"))
         dl = sum(1 for c in self.challenges if c.get("downloaded"))
         self.sub_title = (f"{solved}/{len(self.challenges)} solved · {dl} downloaded · "
-                          f"filter: {FILTER_LABEL[self.filter_mode]} · sort: {SORT_LABEL[self.sort_mode]}")
+                          f"{self._view_summary()}")
         self._save_ui_state()
 
     def action_refresh(self) -> None:
@@ -1096,6 +1136,8 @@ class Flagship(App):
         for c in self.challenges:
             if int(c.get("id", -1)) == cid:
                 c["solved"] = True
+        self._session_solved.add(cid)
+        self._tree_sig = None  # force a rebuild so the new state shows immediately
         self._emit(f"✔ Correct! {message}".strip(), "information", 6)
         self._apply_challenges(self.challenges)
 

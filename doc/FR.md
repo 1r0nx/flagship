@@ -72,8 +72,8 @@ Onglet **Challenges** : navigation par catégorie ; pour chaque challenge, affic
 téléchargement (`▣`/`▢`), du statut (`●`/`○`), des points et du nombre de solves. Le panneau de
 détail présente le first blood, la connexion, les **prérequis** (challenges à résoudre avant, avec
 leur état et un indicateur verrouillé/déverrouillé), les fichiers et les indices. La description est
-consultable sans téléchargement. L'interface offre une recherche (`/`), des filtres (`f` : tous,
-non résolus, résolus), un tri (`o` : catégorie, points, solves), la soumission de flag (avec
+consultable sans téléchargement. L'interface offre une recherche (`/`), des filtres (`f` : tous (valeur au démarrage),
+non résolus, résolus), un tri (`o` : catégorie, points, solves, moins de solves, nom A→Z, id CTFd, téléchargés d'abord, non résolus d'abord), la soumission de flag (avec
 écriture de `flag.txt` si le flag est correct), le téléchargement ou la mise à jour (`d`), le
 téléchargement de toute une **catégorie** (`C`), la synchronisation complète (`D`, parallèle, avec
 barre de progression), le déblocage d'indice (`u`), la copie de la connexion (`c`), l'ouverture du
@@ -245,14 +245,14 @@ doit être recréé à partir de `config.sh.example`.
 | Touche | Action |
 |--------|--------|
 | `↑`/`↓`, Entrée | naviguer et ouvrir un challenge (affiche l'énoncé, sans télécharger) |
-| clic sur les onglets | basculer entre Challenges et Scoreboard |
+| clic sur les onglets | basculer entre Challenges, Scoreboard, Stats et Notifications |
 | `d` | télécharger ou mettre à jour le challenge sélectionné (recrée `desc.txt` si manquant, complète les fichiers manquants dans `work/`) |
 | `D` | tout synchroniser (parallèle, barre de progression, confirmation) |
 | `C` | télécharger tous les challenges de la catégorie sous le curseur (confirmation) |
 | `/` | aller à la barre de recherche |
 | `r` | actualiser la liste immédiatement (plus scoreboard et rang) |
-| `f` | changer de filtre (tous, non résolus, résolus) |
-| `o` | changer le tri (catégorie, points, solves) |
+| `f` | changer de filtre (all, unsolved, solved) |
+| `o` | changer le tri : catégorie (points ↑), points (↓), solves (↓), moins de solves, nom A→Z, id CTFd, téléchargés d'abord, non résolus d'abord |
 | `t` | changer de thème de couleurs (cycle, persisté) |
 | `s` | aller au champ de soumission du flag |
 | `u` | débloquer un indice (confirmation) |
@@ -317,7 +317,7 @@ sans interrompre l'application.
 - `write_flag()` écrit `flag.txt`, jamais par-dessus un fichier existant.
 
 Les toasts de notification sont aussi écrits dans `<base>/.flagship/notifications.log`, et consultables
-dans l'onglet **Notifications**. L'état d'interface (filtre, tri, catégories pliées ou dépliées, dernière sélection, largeur des panneaux) est
+dans l'onglet **Notifications**. L'état d'interface (tri, catégories pliées ou dépliées, dernière sélection, largeur des panneaux) est
 conservé dans `<base>/.flagship/state.json`, puis restauré aux reconstructions de l'arbre
 (téléchargement, rafraîchissement) et à la réouverture de la TUI.
 
