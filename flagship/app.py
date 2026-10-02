@@ -818,11 +818,14 @@ class Flagship(App):
         dt.clear()
         me_name = (self.me or {}).get("name")
         my_row = None
+        # "$warning" is a Textual CSS variable, meaningless to Rich's Text(style=...): resolve it
+        # to the active theme's actual color first, or the highlight silently does nothing
+        warning = self.get_css_variables().get("warning", "yellow")
         for i, r in enumerate(rows):
             is_me = bool(me_name) and r["name"] == me_name
-            st = "bold $warning" if is_me else ""
+            st = f"bold {warning}" if is_me else ""
             dt.add_row(
-                Text(("➤ " if is_me else "") + str(r["pos"]), style=st),
+                Text(str(r["pos"]), style=st),
                 Text(str(r["name"]), style=st),
                 Text(str(r["score"]), style=st),
             )
