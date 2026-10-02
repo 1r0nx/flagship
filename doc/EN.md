@@ -1,5 +1,8 @@
 # 🚩 Flagship (Documentation EN)
 
+New CTF, same routine: folders, downloads, tracking what's solved, keeping notes. Flagship
+handles all that, you just solve challenges.
+
 A terminal app for CTFd. Lists challenges, downloads files, tracks what you solved, lets you
 submit flags. No browser needed.
 
