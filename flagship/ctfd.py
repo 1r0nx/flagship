@@ -227,27 +227,6 @@ class CTFd:
         """Full URL (with file token) as provided by the API."""
         return file_path if file_path.startswith("http") else self.url + file_path
 
-    def ctf_end(self) -> float | None:
-        """Timestamp (epoch, seconds) of the CTF end if the API exposes it, otherwise None.
-
-        The `/api/v1/configs` endpoint is often admin-only: on refusal (401/403) or a
-        missing key, None is returned silently (the end can then be provided manually via
-        CTF_END in config.sh).
-        """
-        try:
-            data = self._get("/api/v1/configs").get("data", [])
-        except CTFdError:
-            return None
-        if isinstance(data, dict):
-            data = [{"key": k, "value": v} for k, v in data.items()]
-        for row in data or []:
-            if isinstance(row, dict) and row.get("key") == "end" and row.get("value"):
-                try:
-                    return float(row["value"])
-                except (TypeError, ValueError):
-                    return None
-        return None
-
 
 def _stream_to(r: "requests.Response", dest, max_bytes: int) -> tuple[str, str]:
     """Write the stream to dest while honouring a max size (2 GB safeguard)."""

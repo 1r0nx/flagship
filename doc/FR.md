@@ -9,15 +9,16 @@ les challenges dans une arborescence de dossiers organisée et permet de les par
 énoncés et de soumettre les flags sans quitter le terminal.
 
 ```
-┌ Flagship · MyCTF · score 8270 (#3) · ⏳ ends in 2h11 · 12/40 solved ──────┐
-│▣ ▢ files  ● ○ solved           │ # 2 - Return                             │
-│Pwn (3/8)                       │ Category: Pwn · Points: 200 · ○ unsolved │
-│ ▣ ●  0 - Overflow 100·12 solves│ Prerequisites (unlocked): ✔ 0 - Overflow │
-│ ▣ ○  2 - Return   200·5 solves │ Connection: nc chal... 1389              │
-│Crypto (5/9)                    │ Can you pwn this problem? ...            │
-│ ▢ ●  First XOR    50·30 solves ├──────────────────────────────────────────┤
-│ ▢ ○  RSA          150·5 solves │ 🚩                                       │
-└ d Download  D Sync all  w Folder  u Hint  / Search  f Filter  o Sort  q Quit ┘
+┌───────────────────────────────Flagship───────────────────────────────┐
+│▣ ▢ files  ● ○ solved              │ # 2 - Return                     │
+│filter: all  sort: points  search: │ ──────────INFO──────────         │
+│Pwn (3/8)                          │ Category: Pwn · Points: 200 · ○  │
+│ ▣ ●  0 - Overflow 100·12 solves   │ Connection: nc chal... 1389      │
+│ ▣ ○  2 - Return   200·5 solves    │ ───────DESCRIPTION───────        │
+│Crypto (5/9)                       │ Can you pwn this problem? ...    │
+│ ▢ ●  First XOR    50·30 solves    ├──────────────────────────────────┤
+│ ▢ ○  RSA          150·5 solves    │ 🚩                                │
+└ d Download  D Sync all  w Folder  u Hint  / Search  f Filter  o Sort ─┘
 ```
 
 > **Langue de l'interface** : l'interface de Flagship (libellés, notifications, messages d'erreur,
@@ -29,7 +30,9 @@ Les marqueurs de chaque ligne sont rappelés par une légende en haut de la colo
 `▣`/`▢` pour les fichiers téléchargés, `●`/`○` pour l'état résolu, et `N pt · N solves` pour les
 points et le nombre de solves. Deux formes distinctes (carré pour les fichiers, cercle pour le
 statut) et une couleur rendent l'état lisible d'un coup d'œil, avec un alignement constant quelle
-que soit la combinaison.
+que soit la combinaison. Juste en dessous se trouve la ligne filtre/tri/recherche (voir plus bas).
+L'icône de palette de commandes de l'en-tête est masquée (`⭘`, en haut à gauche dans une app Textual
+standard) — elle n'est reliée à rien dans Flagship.
 
 ## Fonctionnalités
 
@@ -70,16 +73,23 @@ déblocage, ou modification de coût.
 
 Onglet **Challenges** : navigation par catégorie ; pour chaque challenge, affichage de l'état de
 téléchargement (`▣`/`▢`), du statut (`●`/`○`), des points et du nombre de solves. Le panneau de
-détail présente le first blood, la connexion, les **prérequis** (challenges à résoudre avant, avec
-leur état et un indicateur verrouillé/déverrouillé), les fichiers et les indices. La description est
-consultable sans téléchargement. L'interface offre une recherche (`/`), des filtres (`f` : tous (valeur au démarrage),
+détail est découpé en trois sections par un séparateur centré `────TITRE────`, dimensionné à la
+largeur actuelle du panneau : **INFO** (first blood, connexion, **prérequis** — challenges à
+résoudre avant, avec leur état et un indicateur verrouillé/déverrouillé —, dossier, fichiers, liens
+externes), **DESCRIPTION**, puis **HINT(S)** (affichée en dernier, uniquement si le challenge a des
+indices). La description est consultable sans téléchargement, et les séparateurs se recentrent après
+un redimensionnement du panneau (voir « Panneaux redimensionnables » ci-dessous).
+L'interface offre une recherche (`/` : intégrée directement sur la ligne filtre/tri, sans jamais
+  coûter de hauteur de terminal supplémentaire, qu'elle soit active ou non), des filtres (`f` : tous (valeur au démarrage),
 non résolus, résolus), un tri (`o` : catégorie, points, solves, moins de solves, nom A→Z, id CTFd, téléchargés d'abord, non résolus d'abord), la soumission de flag (avec
 écriture de `flag.txt` si le flag est correct), le téléchargement ou la mise à jour (`d`), le
 téléchargement de toute une **catégorie** (`C`), la synchronisation complète (`D`, parallèle, avec
 barre de progression), le déblocage d'indice (`u`), la copie de la connexion (`c`), l'ouverture du
 dossier (`w`), l'édition des notes (`e`, `notes.md`) et l'export vers `PROGRESS_flagship.md` (`p`,
-sans jamais toucher au `PROGRESS.md` de l'utilisateur). L'en-tête affiche le score, le rang et un
-**compte à rebours** jusqu'à la fin du CTF.
+sans jamais toucher au `PROGRESS.md` de l'utilisateur). L'en-tête affiche juste le nom de l'app,
+centré — score, rang, résolus/téléchargés et le filtre/tri actifs sont volontairement absents,
+puisqu'ils sont déjà visibles juste en dessous (la ligne filtre/tri) et dans l'onglet **Stats** ;
+les répéter sur la barre de titre n'ajoutait que du bruit.
 
 À la soumission, les flags **incorrects** déjà tentés sont mémorisés : resoumettre un flag identique
 est bloqué (avec un avertissement) afin de ne pas gaspiller de tentative. Chaque tentative est aussi
@@ -93,15 +103,73 @@ largeur choisie est mémorisée (en pourcentage) dans `.flagship/state.json` (`t
 Onglet **Scoreboard** : classement avec position, équipe ou joueur, et score. La ligne de
 l'utilisateur est surlignée et le curseur s'y positionne.
 
-Onglet **Stats** : récapitulatif de la progression : score et rang, nombre de résolus et points
-gagnés sur le total, challenges téléchargés, puis un tableau par catégorie (résolus, points,
-téléchargés) et des barres de progression par catégorie. Il se met à jour automatiquement. En
-**mode équipe**, une section **« Team members »** s'ajoute : ton rang et ton score
-individuels, puis un **tableau de tous les membres** (résolus et points de chacun, calculés depuis
-les solves de l'équipe), trié par points, ta ligne étant surlignée et marquée « (you) ». Chaque
-**pseudo est cliquable** : un clic ouvre une fenêtre détaillant les stats de ce membre, avec ses
-sections « By category » et « Progress by category » (classées par points) pour voir où
-chacun a le plus contribué.
+Onglet **Stats** : un tableau récapitulatif (nom, score et rang, résolus, points gagnés,
+téléchargés, et **first bloods**), puis un tableau par catégorie et des barres de progression par
+catégorie. Il se met à jour automatiquement. Les first bloods sont comptés en récupérant, en
+arrière-plan, le premier solveur de chaque challenge que tu as résolu (un appel API par challenge,
+une seule fois — un first blood ne change jamais une fois fixé, le résultat est donc mis en cache
+définitivement dans `.flagship/fb_cache.json`, vérifié dans le code source de CTFd :
+`get_solves_for_challenge_id()` renvoie toujours l'ordre de résolution définitif et permanent du
+compte) ; pendant ce rattrapage, la ligne affiche `· checking N more…` à côté d'un compte
+provisoire. Exemple en solo :
+
+| Stat | Value |
+|------|-------|
+| Player | retro_pw |
+| Score | 4210  ·  Rank #7th |
+| Solved | 63 / 180 |
+| Points earned | 4210 / 11200 |
+| Downloaded | 58 / 180 |
+| First bloods | 9 / 63 |
+
+En **mode équipe**, le même tableau utilise le nom et le score de l'équipe, le libellé devient
+« Team first bloods » (c'est un comportement propre à CTFd, pas un choix de Flagship : en mode
+équipe, l'endpoint `/challenges/<id>/solves` renvoie le nom de l'**équipe** qui a résolu, jamais
+celui du membre qui a réellement tapé le flag — vérifié dans `get_solves_for_challenge_id()` de
+CTFd, qui interroge `Model.name` où `Model` est le modèle Teams), et une section
+**« Team members »** s'ajoute en dessous :
+
+| Stat | Value |
+|------|-------|
+| Team | NightOwls |
+| Score (team) | 15420  ·  Rank #1st |
+| Solved | 60 / 120 |
+| Points earned | 15420 / 29800 |
+| Downloaded | 45 / 120 |
+| Team first bloods | 18 / 60 |
+
+*Your individual rank: #5 · your score: 5400*
+
+| Member | Solved | Points |
+|--------|--------|--------|
+| **Alice (you)** | **22** | **5400** |
+| Carol | 19 | 5320 |
+| Bob | 19 | 4700 |
+
+trié par points, ta propre ligne étant surlignée et marquée « (you) » — ces chiffres viennent de
+`/teams/me/solves`, qui (vérifié dans le `SubmissionSchema` de CTFd) attribue bien chaque solve au
+membre individuel via un objet imbriqué `user: {id, name}`, contrairement à la liste de solves au
+niveau challenge ci-dessus. Chaque **pseudo est cliquable** : un clic ouvre une fenêtre détaillant
+les stats propres de ce membre — résolus, points, et **son propre nombre de first bloods** (un
+challenge compte pour un membre quand c'est un first blood de l'équipe ET que c'est lui qui l'a
+personnellement soumis) :
+
+```
+# Bob
+**Solved**: 19  ·  **Points**: 4700  ·  **First bloods**: 6
+
+## By category (ranked by points)
+
+| Category | Solved | Points |
+|----------|--------|--------|
+| Pwn      | 8/10   | 2400/2800 |
+| Web      | 11/14  | 2300/3100 |
+
+## Progress by category
+
+Pwn   ██████████░░  8/10
+Web   █████████░░░  11/14
+```
 
 Onglet **Notifications** : l'historique des notifications (les plus récentes en haut), mis à jour en
 direct. Chaque événement y apparaît en plus du toast éphémère.
@@ -166,7 +234,6 @@ WATCH_CHANGES=true         # suivre les changements desc/indices (desc2.txt...) 
 AUTO_UNLOCK_FREE_HINTS=false # débloquer automatiquement les indices gratuits (coût 0)
 DOWNLOAD_WORKERS=6         # téléchargements en parallèle pour « Tout synchroniser »
 THEME=textual-dark         # thème de départ (nord, gruvbox, dracula, tokyo-night ; `t` pour cycler)
-CTF_END=2026-10-05T18:00   # fin du CTF pour le compte à rebours (epoch ou ISO ; vide = auto via API)
 ```
 
 Le token n'est jamais affiché ni journalisé. Le nom de la variable peut aussi être `TOKEN` ou tout
@@ -249,7 +316,7 @@ doit être recréé à partir de `config.sh.example`.
 | `d` | télécharger ou mettre à jour le challenge sélectionné (recrée `desc.txt` si manquant, complète les fichiers manquants dans `work/`) |
 | `D` | tout synchroniser (parallèle, barre de progression, confirmation) |
 | `C` | télécharger tous les challenges de la catégorie sous le curseur (confirmation) |
-| `/` | aller à la barre de recherche |
+| `/` | mettre le focus sur le champ de recherche en ligne (sur la ligne filtre/tri ; la saisie filtre l'arbre en direct) |
 | `r` | actualiser la liste immédiatement (plus scoreboard et rang) |
 | `f` | changer de filtre (all, unsolved, solved) |
 | `o` | changer le tri : catégorie (points ↑), points (↓), solves (↓), moins de solves, nom A→Z, id CTFd, téléchargés d'abord, non résolus d'abord |
@@ -266,7 +333,11 @@ doit être recréé à partir de `config.sh.example`.
 | `q` | quitter |
 
 Pour soumettre un flag : sélectionner un challenge, appuyer sur `s`, saisir le flag, puis `Entrée`.
-Pour rechercher : appuyer sur `/` et saisir une partie du nom (l'arbre se filtre en direct). Pour
+Pour rechercher : appuyer sur `/` et saisir une partie du nom (l'arbre se filtre en direct). Le champ
+de recherche fait partie intégrante de la ligne filtre/tri au-dessus de la liste : il n'agrandit
+jamais la mise en page ni ne prend de ligne à part, qu'il soit actif, en cours de saisie ou
+simplement vide. `Entrée` ou un clic ailleurs laisse le filtre actif ; `Échap` l'annule en plus
+(efface le texte, retrouve tous les challenges). Pour
 débloquer un indice : appuyer sur `u` puis confirmer (le moins cher est proposé). Un indice payant
 réduit le score, d'où la confirmation.
 
@@ -291,8 +362,7 @@ commentaires. Aucun `source` shell n'est exécuté, ce qui évite tout effet de 
   le `/…/solves` correspondant (résolus), et `GET /api/v1/scoreboard` (classement) ;
 - en mode équipe, `GET /api/v1/teams/me/solves` fournit aussi la contribution de chaque membre
   (chaque solve porte le membre qui l'a résolu) ;
-- `GET /api/v1/configs` est tenté pour la date de fin (compte à rebours ; souvent réservé aux admins,
-  d'où la possibilité de la fixer via `CTF_END`) ;
+- `GET /api/v1/challenges/<id>/solves` donne le first blood (onglet Stats) ;
 - `POST /api/v1/challenges/attempt` (soumission) et `POST /api/v1/unlocks` (déblocage d'indice) ;
 - téléchargement des fichiers listés.
 

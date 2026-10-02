@@ -9,15 +9,16 @@ clean folder tree and lets users browse them, read the briefs and submit flags w
 terminal.
 
 ```
-┌ Flagship · MyCTF · score 8270 (#3) · ⏳ ends in 2h11 · 12/40 solved ─────┐
-│▣ ▢ files  ● ○ solved           │ # 2 - Return                            │
-│Pwn (3/8)                       │ Category: Pwn · Points: 200 · ○         │
-│ ▣ ●  0 - Overflow 100·12 solves│ Prerequisites (unlocked): ✔ 0 - Overflow│
-│ ▣ ○  2 - Return   200·5 solves │ Connection: nc chal... 1389             │
-│Crypto (5/9)                    │ Can you pwn this problem? ...           │
-│ ▢ ●  First XOR    50·30 solves ├─────────────────────────────────────────┤
-│ ▢ ○  RSA          150·5 solves │ 🚩                                      │
-└ d Dl  D Sync  w Folder  u Hint  / Search  f Filter  o Sort  q Quit ──────┘
+┌──────────────────────────────Flagship──────────────────────────────┐
+│▣ ▢ files  ● ○ solved              │ # 2 - Return                   │
+│filter: all  sort: points  search: │ ──────────INFO──────────       │
+│Pwn (3/8)                          │ Category: Pwn · Points: 200 · ○│
+│ ▣ ●  0 - Overflow 100·12 solves   │ Connection: nc chal... 1389    │
+│ ▣ ○  2 - Return   200·5 solves    │ ───────DESCRIPTION───────      │
+│Crypto (5/9)                       │ Can you pwn this problem? ...  │
+│ ▢ ●  First XOR    50·30 solves    ├────────────────────────────────┤
+│ ▢ ○  RSA          150·5 solves    │ 🚩                              │
+└ d Dl  D Sync  w Folder  u Hint  / Search  f Filter  o Sort  q Quit ─┘
 ```
 
 > **Interface language**: the whole Flagship interface (labels, notifications, error messages,
@@ -27,7 +28,9 @@ terminal.
 A legend at the top of the left column recalls each line's markers: `▣`/`▢` for downloaded files,
 `●`/`○` for solved state, and `N pt · N solves` for points and solve count. Two distinct shapes
 (square for files, circle for status) plus colour make the state readable at a glance, with
-consistent alignment regardless of the combination.
+consistent alignment regardless of the combination. Right below it sits the filter/sort/search row
+(see below). The header's command-palette icon is hidden (`⭘`, top-left in a stock Textual app) —
+it isn't wired to anything in Flagship.
 
 ## Features
 
@@ -65,15 +68,21 @@ change.
 ### Four-tab interface
 
 **Challenges** tab: browsing by category; for each challenge, display of the download state
-(`▣`/`▢`), the status (`●`/`○`), the points and the solve count. The detail panel shows the first blood,
-the connection, the **prerequisites** (challenges to solve first, with their state and a
-locked/unlocked indicator), the files and the hints. The description is viewable without downloading.
-The interface provides a search (`/`), filters (`f`: all, unsolved, solved; always starts on "all"), a sort (`o`: category, points, solves, fewest solves, name A→Z, CTFd id, downloaded first, unsolved first),
+(`▣`/`▢`), the status (`●`/`○`), the points and the solve count. The detail panel is split into three
+sections by a centered `────TITLE────` divider sized to the pane's current width: **INFO** (first
+blood, connection, **prerequisites** — challenges to solve first, with their state and a
+locked/unlocked indicator —, folder, files, external links), **DESCRIPTION**, and **HINT(S)** (shown
+last, and only when the challenge has hints). The description is viewable without downloading, and
+the dividers re-center after a pane resize (see "Resizable panes" below).
+The interface provides a search (`/`: lives inline on the filter/sort row itself, never costing
+  any extra terminal height, focused or not), filters (`f`: all, unsolved, solved; always starts on "all"), a sort (`o`: category, points, solves, fewest solves, name A→Z, CTFd id, downloaded first, unsolved first),
 flag submission (writing `flag.txt` if the flag is correct), download or update
 (`d`), download of a whole **category** (`C`), full synchronization (`D`, parallel, with a progress
 bar), hint unlock (`u`), connection copy (`c`), open folder (`w`), notes editing (`e`, `notes.md`)
 and export to `PROGRESS_flagship.md` (`p`, without ever touching the user's `PROGRESS.md`). The header
-shows the current score, rank and a **countdown** to the end of the CTF.
+just shows the centered app name — score, rank, solved/downloaded counts and the active
+filter/sort are deliberately kept out of it, since they're already shown right below (the
+filter/sort row) and in the **Stats** tab, and repeating them on the title bar was just noise.
 
 On submission, **incorrect** flags already tried are remembered: resubmitting an identical flag is
 blocked (with a warning) so a submission attempt is not wasted. Every attempt is also logged to
@@ -87,13 +96,70 @@ percentage) in `.flagship/state.json` (`tree_width`).
 **Scoreboard** tab: ranking with position, team or player, and score. The user's row is highlighted
 and the cursor jumps to it.
 
-**Stats** tab: a progress summary: score and rank, number solved and points earned out of the total,
-downloaded challenges, then a per-category table (solved, points, downloaded) and per-category
-progress bars. It updates automatically. In **team mode**, a **"Team members"** section is
-added: your individual rank and score, then a **table of all members** (each one's solves and points,
-computed from the team's solves), sorted by points, with your row highlighted and marked "(you)". Each
-**name is clickable**: a click opens a window detailing that member's stats, with their "By category"
-and "Per-category progress" sections (sorted by points) to see where each one contributed most.
+**Stats** tab: a summary table (name, score and rank, solved, points earned, downloaded, and
+**first bloods**), then a per-category table and per-category progress bars. It updates
+automatically. First bloods are counted by fetching, in the background, the first solver of every
+challenge you've solved (one API call per challenge, the first time only — a first blood never
+changes once set, so the result is cached forever in `.flagship/fb_cache.json`, confirmed against
+CTFd's own source: `get_solves_for_challenge_id()` always returns the account's permanent, final
+solve order); while that backlog is still being checked, the row shows `· checking N more…` next to
+a provisional count. Solo example:
+
+| Stat | Value |
+|------|-------|
+| Player | retro_pw |
+| Score | 4210  ·  Rank #7th |
+| Solved | 63 / 180 |
+| Points earned | 4210 / 11200 |
+| Downloaded | 58 / 180 |
+| First bloods | 9 / 63 |
+
+In **team mode**, the same table uses the team's name and score, the label becomes
+"Team first bloods" (this is CTFd's own behaviour, not a Flagship choice: in team mode the
+`/challenges/<id>/solves` endpoint reports the solving **team**'s name, never the individual member
+who actually typed the flag — confirmed in CTFd's `get_solves_for_challenge_id()`, which looks up
+`Model.name` where `Model` is the Teams model), and a **"Team members"** section is added below it:
+
+| Stat | Value |
+|------|-------|
+| Team | NightOwls |
+| Score (team) | 15420  ·  Rank #1st |
+| Solved | 60 / 120 |
+| Points earned | 15420 / 29800 |
+| Downloaded | 45 / 120 |
+| Team first bloods | 18 / 60 |
+
+*Your individual rank: #5 · your score: 5400*
+
+| Member | Solved | Points |
+|--------|--------|--------|
+| **Alice (you)** | **22** | **5400** |
+| Carol | 19 | 5320 |
+| Bob | 19 | 4700 |
+
+sorted by points, with your own row highlighted and marked "(you)" — figures come from
+`/teams/me/solves`, which (confirmed against CTFd's `SubmissionSchema`) really does attribute each
+solve to the individual member via a nested `user: {id, name}`, unlike the challenge-level solves
+list above. Each **name is clickable**: a click opens a window detailing that member's own stats —
+solved, points, and **their personal first-blood count** (a challenge counts for a member when it's
+one of the team's first bloods AND they personally are the one who submitted it):
+
+```
+# Bob
+**Solved**: 19  ·  **Points**: 4700  ·  **First bloods**: 6
+
+## By category (ranked by points)
+
+| Category | Solved | Points |
+|----------|--------|--------|
+| Pwn      | 8/10   | 2400/2800 |
+| Web      | 11/14  | 2300/3100 |
+
+## Progress by category
+
+Pwn   ██████████░░  8/10
+Web   █████████░░░  11/14
+```
 
 **Notifications** tab: the notification history (most recent on top), updated live. Every event also
 appears here in addition to the transient toast.
@@ -157,7 +223,6 @@ WATCH_CHANGES=true         # track desc/hint changes (desc2.txt...) ; false = li
 AUTO_UNLOCK_FREE_HINTS=false # auto-unlock free (cost 0) hints
 DOWNLOAD_WORKERS=6         # parallel downloads for "Sync all"
 THEME=textual-dark         # start theme (nord, gruvbox, dracula, tokyo-night ; `t` to cycle)
-CTF_END=2026-10-05T18:00   # CTF end for the countdown (epoch or ISO ; empty = auto via API)
 ```
 
 The token is never printed or logged. The variable name can also be `TOKEN` or any name ending in
@@ -239,7 +304,7 @@ from `config.sh.example`.
 | `d` | download or update the selected challenge (recreates `desc.txt` if missing, completes missing files in `work/`) |
 | `D` | sync all (parallel, progress bar, confirmation) |
 | `C` | download every challenge in the category under the cursor (confirmation) |
-| `/` | focus the search bar |
+| `/` | focus the inline search field (on the filter/sort row; typing filters the tree live) |
 | `r` | refresh the list now (plus scoreboard and rank) |
 | `f` | cycle filter (all, unsolved, solved) |
 | `o` | cycle sort: category (points ↑), points (↓), solves (↓), fewest solves, name A→Z, CTFd id, downloaded first, unsolved first |
@@ -256,7 +321,11 @@ from `config.sh.example`.
 | `q` | quit |
 
 To submit a flag: select a challenge, press `s`, type the flag, then `Enter`. To search: press `/`
-and type part of the name (the tree filters live). To unlock a hint: press `u` then confirm (the
+and type part of the name (the tree filters live). The search field is built right into the
+filter/sort row above the list — it never grows the layout or steals a row, whether it's focused,
+being typed into, or just sitting empty. `Enter` or clicking elsewhere leaves with the filter still
+running ; `Esc` additionally CANCELS it (clears the text, shows every challenge again). To unlock a
+hint: press `u` then confirm (the
 cheapest one is offered). A paid hint lowers the score, hence the confirmation.
 
 ## Architecture
@@ -280,8 +349,7 @@ flagship/
   with the matching `/…/solves` (solved), and `GET /api/v1/scoreboard` (ranking);
 - in team mode, `GET /api/v1/teams/me/solves` also provides each member's contribution (every solve
   carries the member who solved it);
-- `GET /api/v1/configs` is attempted for the end date (countdown; often admin-only, hence the
-  `CTF_END` option);
+- `GET /api/v1/challenges/<id>/solves` gives the first blood (Stats tab);
 - `POST /api/v1/challenges/attempt` (submission) and `POST /api/v1/unlocks` (hint unlock);
 - download of listed files.
 

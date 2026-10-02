@@ -12,7 +12,6 @@ Expected format (`KEY=value` lines; `export` and quotes tolerated):
     AUTO_UNLOCK_FREE_HINTS=false # automatically unlock free hints
     DOWNLOAD_WORKERS=6           # parallel downloads for "Sync all"
     THEME=textual-dark           # start colour theme
-    CTF_END=2026-10-05T18:00     # CTF end (countdown); epoch or ISO; empty = auto via API
 
 The token is never displayed nor executed (no shell `source`; plain KEY=value parsing).
 """
@@ -34,7 +33,8 @@ def _strip_quotes(v: str) -> str:
 def parse_sh(path: Path) -> dict[str, str]:
     """Parse a basic config.sh file (KEY=value) without running a shell."""
     data: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    text = path.read_text(encoding="utf-8-sig")  # tolerate a leading UTF-8 BOM (e.g. saved from Windows)
+    for raw in text.splitlines():
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
         m = _LINE.match(raw)
@@ -66,7 +66,6 @@ class Config:
     auto_unlock_free_hints: bool  # automatically unlock cost-0 hints
     download_workers: int  # parallel downloads for "Sync all"
     theme: str  # start colour theme (e.g. textual-dark, nord, gruvbox, dracula…)
-    ctf_end: str  # CTF end for the countdown (epoch or ISO; empty = auto via API)
 
     @classmethod
     def load(cls, path: str | Path) -> "Config":
@@ -111,5 +110,4 @@ class Config:
             auto_unlock_free_hints=_as_bool(d.get("AUTO_UNLOCK_FREE_HINTS"), False),
             download_workers=max(1, int(d.get("DOWNLOAD_WORKERS") or 6)),
             theme=(d.get("THEME") or "textual-dark").strip(),
-            ctf_end=(d.get("CTF_END") or "").strip(),
         )

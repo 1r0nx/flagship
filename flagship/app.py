@@ -133,12 +133,14 @@ class Splitter(Widget):
             self.remove_class("-dragging")
             self.release_mouse()
             self.app._save_ui_state()
+            self.app._refresh_detail_width()
             event.stop()
 
     def on_click(self, event: events.Click) -> None:
         if event.chain >= 2:
             self._left().styles.width = "42%"
             self.app._save_ui_state()
+            self.app._refresh_detail_width()
 
 
 FILTERS = ("all", "unsolved", "solved")
@@ -173,11 +175,22 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(event.button.id == "yes")
 
 
-def build_member_md(name: str, challenges: list[dict], solved_ids: set[int]) -> str:
+def build_member_md(name: str, challenges: list[dict], solved_ids: set[int],
+                    fb_cache: dict[int, str] | None = None,
+                    team_name: str | None = None) -> str:
     """Markdown for a member's detail: "By category" + "Progress by category",
-    computed from the challenges they solved (ranked by descending points)."""
+    computed from the challenges they solved (ranked by descending points).
+
+    `fb_cache` (optional): {challenge_id: first-solver-name}. In team mode, CTFd's public
+    solves list attributes a solve to the TEAM, not the member, so a first blood is counted for
+    this member when `fb_cache[cid] == team_name` (the team's own first blood) AND the
+    challenge is in this member's personal `solved_ids` (which DOES come from a per-member
+    source: `/teams/me/solves`'s `user` field) — i.e. they personally made that winning
+    submission. `team_name` defaults to `name` for the solo-player case."""
+    fb_cache = fb_cache or {}
+    fb_name = team_name if team_name is not None else name
     cats: dict[str, dict] = {}
-    total_s = total_p = 0
+    total_s = total_p = total_fb = 0
     for c in challenges:
         cid = int(c.get("id", -1))
         d = cats.setdefault(c.get("category", "?"), {"n": 0, "s": 0, "pw": 0, "pt": 0})
@@ -189,7 +202,10 @@ def build_member_md(name: str, challenges: list[dict], solved_ids: set[int]) -> 
             d["pw"] += v
             total_s += 1
             total_p += v
-    md = [f"# {name}", "", f"**Solved**: {total_s}  ·  **Points**: {total_p}"]
+            if fb_cache.get(cid) == fb_name:
+                total_fb += 1
+    fb_note = f"  ·  **First bloods**: {total_fb}" if fb_cache else ""
+    md = [f"# {name}", "", f"**Solved**: {total_s}  ·  **Points**: {total_p}{fb_note}"]
     done = {k: v for k, v in cats.items() if v["s"] > 0}
     if not done:
         md += ["", "*No challenge solved yet.*"]
@@ -219,17 +235,21 @@ class MemberStatsScreen(ModalScreen[None]):
     #mhead { color: $text-muted; }
     """
 
-    def __init__(self, name: str, challenges: list[dict], solved_ids: set[int]):
+    def __init__(self, name: str, challenges: list[dict], solved_ids: set[int],
+                fb_cache: dict[int, str] | None = None, team_name: str | None = None):
         super().__init__()
         self._name = name
         self._challenges = challenges
         self._solved = solved_ids
+        self._fb_cache = fb_cache
+        self._team_name = team_name
 
     def compose(self) -> ComposeResult:
         with Vertical(id="mbox"):
             yield Static("Esc to close", id="mhead")
             with VerticalScroll():
-                yield Markdown(build_member_md(self._name, self._challenges, self._solved),
+                yield Markdown(build_member_md(self._name, self._challenges, self._solved,
+                                               self._fb_cache, self._team_name),
                                open_links=False)
 
     def action_dismiss(self) -> None:
@@ -238,9 +258,16 @@ class MemberStatsScreen(ModalScreen[None]):
 
 class Flagship(App):
     CSS = """
-    #search { dock: top; }
+    Header HeaderIcon { display: none; }  /* drop the "⭘" command-palette icon, top-left */
+    /* the screen itself must never scroll: every pane that needs it (tree, detail, stats,
+       notifications) already has its own scrollbar, so a 1-row layout mismatch must never
+       spawn a second, screen-wide scrollbar next to a pane's real one */
+    Screen { overflow-y: hidden; }
     #treecol { width: 42%; }
-    #legend { height: auto; min-height: 2; padding: 0 1; background: $panel; color: $text-muted; }
+    #legend_icons { height: 1; padding: 0 1; background: $panel; color: $text-muted; }
+    #legend_row { height: 1; background: $panel; }
+    #legend_labels { width: auto; padding: 0 0 0 1; color: $text-muted; }
+    #search { border: none; height: 1; width: 1fr; padding: 0 1; background: $panel; }
     #tree { height: 1fr; }
     #rightcol { width: 1fr; }
     #detailwrap { height: 1fr; }
@@ -288,41 +315,30 @@ class Flagship(App):
         self._members: list[dict] = []        # per-member team contribution (team mode)
         self._last_scoreboard: list[dict] = []
         self._detail_cache: dict[int, dict] = {}
-        self._fb_cache: dict[int, str | None] = {}
+        self._fb_cache: dict[int, str] = {}
+        self._fb_backoff = False  # True once a whole fb_worker batch failed (e.g. CTF over)
         self.notifications: list[str] = []
         self._first_sync = True
         self._syncing = False               # True during "Sync all" (prevents the poll from cancelling it)
         self._tree_sig = None               # signature of the displayed data (avoids useless rebuilds)
-        self._ctf_end = self._parse_end(cfg.ctf_end)  # end epoch (countdown) or None
         self._log_path = cfg.base_dir / ".flagship" / "notifications.log"
         self._state_path = cfg.base_dir / ".flagship" / "state.json"
-
-    @staticmethod
-    def _parse_end(raw: str | None) -> float | None:
-        """Interpret CTF_END: epoch (number) or ISO date (e.g. 2026-10-05T18:00)."""
-        raw = (raw or "").strip()
-        if not raw:
-            return None
-        try:
-            return float(raw)
-        except ValueError:
-            pass
-        try:
-            return datetime.fromisoformat(raw.replace("Z", "")).timestamp()
-        except ValueError:
-            return None
 
     # -- layout ----------------------------------------------------------
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        # leading space: the I-beam cursor blinks on it (col 0) without hiding the emoji
-        yield BeamInput(placeholder=" 🔎 Search…  ( / )", id="search")
         with TabbedContent(initial="tab-chal"):
             with TabPane("Challenges", id="tab-chal"):
                 with Horizontal():
                     with Vertical(id="treecol"):
-                        # filled in by _update_legend() on mount (single source of truth for its text)
-                        yield Static(id="legend")
+                        # icons line ; filled in by _update_legend() (single source of truth)
+                        yield Static(id="legend_icons")
+                        with Horizontal(id="legend_row"):
+                            # "filter: … sort: …" ; filled in by _update_legend() too
+                            yield Static(id="legend_labels")
+                            # no separate row, no border: lives right on the filter/sort line,
+                            # so it never costs any extra terminal height, focused or not (`/`)
+                            yield BeamInput(placeholder="(type to filter)", id="search")
                         yield Tree("Challenges", id="tree")
                     yield Splitter("treecol", id="splitter")
                     with Vertical(id="rightcol"):
@@ -347,18 +363,17 @@ class Flagship(App):
         dt.add_columns("#", "Team / Player", "Score")
         dt.cursor_type = "row"
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
+        cached_fb = store.load_json(self.cfg.base_dir, "fb_cache.json", {}) or {}
+        self._fb_cache = {int(k): v for k, v in cached_fb.items()}
         self._restore_ui_state()
         self._update_legend()
         th = getattr(self, "_pref_theme", None) or self.cfg.theme
         if th in self.available_themes:
             self.theme = th
+        self._update_title()
         self.list_worker()
         self.scoreboard_worker()
         self.me_worker()
-        if self._ctf_end is None:        # end not provided by config.sh: try the API
-            self.ctf_meta_worker()
-        self._update_title()
-        self.set_interval(30, self._update_title)  # refresh the countdown
         if self.cfg.poll_interval and self.cfg.poll_interval > 0:
             self.set_interval(self.cfg.poll_interval, self.list_worker)
             self.set_interval(self.cfg.poll_interval, self.scoreboard_worker)
@@ -471,41 +486,10 @@ class Flagship(App):
                 self.call_from_thread(self._apply_me, cached["me"],
                                       cached.get("personal"), cached.get("members"))
 
-    @work(thread=True, exclusive=True, group="ctfmeta")
-    def ctf_meta_worker(self) -> None:
-        end = self.client.ctf_end()
-        if end:
-            self.call_from_thread(self._set_ctf_end, end)
-
-    def _set_ctf_end(self, end: float) -> None:
-        self._ctf_end = end
-        self._update_title()
-
-    def _countdown_str(self) -> str:
-        """Countdown text (or '' if no end is known)."""
-        if not self._ctf_end:
-            return ""
-        rem = int(self._ctf_end - datetime.now().timestamp())
-        if rem <= 0:
-            return "⏳ ended"
-        mins, _ = divmod(rem, 60)
-        hours, mins = divmod(mins, 60)
-        days, hours = divmod(hours, 24)
-        if days:
-            return f"⏳ ends in {days}d{hours:02d}h"
-        if hours:
-            return f"⏳ ends in {hours}h{mins:02d}"
-        return f"⏳ ends in {mins}min"
-
     def _update_title(self) -> None:
-        parts = [f"Flagship · {self.cfg.ctf_name}"]
-        s, p = self.me.get("score"), self.me.get("place")
-        if s is not None:
-            parts.append(f"score {s}" + (f" (#{p})" if p else ""))
-        cd = self._countdown_str()
-        if cd:
-            parts.append(cd)
-        self.title = " · ".join(parts)
+        """Just the app name, centered by Header — score/rank/solved/downloaded/filter/sort are
+        all shown elsewhere already (Stats tab, legend row), so this line stays uncluttered."""
+        self.title = "Flagship"
 
     def _render_stats(self) -> None:
         try:
@@ -524,15 +508,26 @@ class Flagship(App):
         s, p = self.me.get("score"), self.me.get("place")
         team = self.me.get("team")
         md = [f"# Statistics · {self.cfg.ctf_name}", ""]
-        if self.me.get("name"):
-            who = "Team" if team else "Player"
-            md.append(f"**{who}** : {self.me['name']}")
+        my_name = self.me.get("name")
+        solved_ids = {int(c["id"]) for c in solved}
+        known_fb = {cid: self._fb_cache[cid] for cid in solved_ids if cid in self._fb_cache}
+        fb_count = sum(1 for n in known_fb.values() if n == my_name)
+        pending = len(solved_ids) - len(known_fb)
+        fb_label = "Team first bloods" if team else "First bloods"
+
+        rows = []
+        if my_name:
+            rows.append(("Team" if team else "Player", my_name))
         if s is not None:
-            label = "Score (team)" if team else "Score"
-            md.append(f"**{label}** : {s}" + (f"  ·  **Rank**: #{p}" if p else ""))
-        md.append(f"**Solved**: {len(solved)} / {total}  ·  "
-                  f"**Points earned**: {pts_won} / {pts_all}")
-        md.append(f"**Downloaded**: {len(dled)} / {total}")
+            score_label = "Score (team)" if team else "Score"
+            rows.append((score_label, f"{s}" + (f"  ·  Rank #{p}" if p else "")))
+        rows.append(("Solved", f"{len(solved)} / {total}"))
+        rows.append(("Points earned", f"{pts_won} / {pts_all}"))
+        rows.append(("Downloaded", f"{len(dled)} / {total}"))
+        rows.append((fb_label, f"{fb_count} / {len(solved)}" +
+                    (f"  ·  _checking {pending} more…_" if pending else "")))
+        md += ["| Stat | Value |", "|------|-------|"]
+        md += [f"| {k} | {v} |" for k, v in rows]
         if self._personal:  # team mode: each member's contribution
             val = {int(c["id"]): int(c.get("value") or 0) for c in chs if c.get("id") is not None}
             my_id = self._personal.get("id")
@@ -602,7 +597,8 @@ class Flagship(App):
         if not m:
             return
         self.push_screen(MemberStatsScreen(
-            m.get("name", "?"), self.challenges, set(m.get("solved_ids", []))))
+            m.get("name", "?"), self.challenges, set(m.get("solved_ids", [])),
+            self._fb_cache, self.me.get("name")))
 
     def _apply_me(self, me: dict, personal: dict | None = None,
                   members: list | None = None) -> None:
@@ -611,7 +607,6 @@ class Flagship(App):
             self._personal = personal
         if members is not None:
             self._members = members
-        self._update_title()
         self._render_stats()
         if self._last_scoreboard:  # re-highlight your row without refetching
             self._fill_scoreboard(self._last_scoreboard)
@@ -701,6 +696,26 @@ class Flagship(App):
             except Exception:  # noqa: BLE001
                 pass
 
+    @work(thread=True, exclusive=True, group="fb")
+    def fb_worker(self) -> None:
+        """Background: fetch the first solver of every SOLVED challenge whose first blood isn't
+        cached yet, so the Stats tab can show how many of them were our own first blood. Cheap on
+        a normal poll (nothing to fetch once the backlog is known), persisted so it is only ever
+        paid once per challenge."""
+        if self._fb_backoff:  # a previous batch failed entirely (CTF over?) : wait for `r`
+            return
+        ids = [int(c["id"]) for c in self.challenges if c.get("solved")]
+        todo = [cid for cid in ids if cid not in self._fb_cache]
+        new, errors = store.fetch_first_bloods(self.client, ids, self._fb_cache, self.cfg.download_workers)
+        if todo and errors == len(todo):  # every single lookup failed : stop hammering the API
+            self._fb_backoff = True
+        if not new:
+            return
+        self._fb_cache.update(new)
+        store.save_json(self.cfg.base_dir, "fb_cache.json",
+                        {str(k): v for k, v in self._fb_cache.items()})
+        self.call_from_thread(self._render_stats)
+
     # -- applying data ----------------------------------------
     def _apply_challenges(self, challenges: list[dict], events: list[dict] | None = None) -> None:
         prev_ids = {int(c["id"]) for c in self.challenges}
@@ -719,11 +734,8 @@ class Flagship(App):
         if sig != self._tree_sig:
             self._tree_sig = sig
             self._rebuild_tree()
-        solved = sum(1 for c in challenges if c.get("solved"))
-        dl = sum(1 for c in challenges if c.get("downloaded"))
-        self.sub_title = (f"{solved}/{len(challenges)} solved · {dl} downloaded · "
-                          f"{self._view_summary()}")
         self._render_stats()
+        self.fb_worker()
 
         for ev in events or []:
             if ev.get("kind") == "desc":
@@ -740,6 +752,13 @@ class Flagship(App):
         if self._first_sync:
             self._reselect_last()
         self._first_sync = False
+
+    def _refresh_detail_width(self) -> None:
+        """Re-render the current detail so its section dividers re-center after a pane resize."""
+        if not self.selected:
+            return
+        cid = int(self.selected["id"])
+        self._render_detail({**self.selected, **self._detail_cache.get(cid, {})})
 
     def _reselect_last(self) -> None:
         last = getattr(self, "_last_selected_id", None)
@@ -777,9 +796,6 @@ class Flagship(App):
         if self.filter_mode == "solved":
             return bool(c.get("solved"))
         return True
-
-    def _view_summary(self) -> str:
-        return f"filter: {FILTER_LABEL[self.filter_mode]} · sort: {SORT_LABEL[self.sort_mode]}"
 
     def _rebuild_tree(self) -> None:
         tree = self.query_one("#tree", Tree)
@@ -843,9 +859,22 @@ class Flagship(App):
                 return
             self._detail_cache[cid] = detail
         if cid not in self._fb_cache:
-            self._fb_cache[cid] = self.client.first_blood(cid)
+            fb = self.client.first_blood(cid)
+            if fb is not None:  # "no solver yet" is never cached: it can change later, unlike a
+                self._fb_cache[cid] = fb  # real first blood, which is permanent once set
         if self.selected and int(self.selected["id"]) == cid:
             self.call_from_thread(self._render_detail, {**self.selected, **detail})
+
+    def _rule(self, title: str) -> str:
+        """Centered section divider (`────TITLE────`), sized to the detail pane's current
+        content width so it stays centered after a resize (splitter drag or terminal resize)."""
+        try:
+            width = self.query_one("#detail").size.width - 2  # minus the left/right padding
+        except Exception:
+            width = 0
+        width = max(width, len(title) + 4)
+        left = (width - len(title)) // 2
+        return "─" * left + title + "─" * (width - len(title) - left)
 
     def _render_detail(self, c: dict, loading: bool = False) -> None:
         files = [Path(f.split("?")[0]).name for f in (c.get("files") or [])]
@@ -855,7 +884,7 @@ class Flagship(App):
         if c.get("solves") is not None:
             meta += f"  ·  **Solves**: {c['solves']}"
         fb = self._fb_cache.get(cid)
-        md = [f"# {c.get('name','?')}", meta]
+        md = [f"# {c.get('name','?')}", self._rule("INFO"), meta]
         if fb:
             md.append(f"🩸 **First blood**: {fb}")
         md.append(f"**Connection**: `{c.get('connection_info') or 'none'}`")
@@ -878,6 +907,8 @@ class Flagship(App):
         ext = store.extract_links(c.get("description"))
         if ext:
             md.append("**External links**: " + ", ".join(f"[{store.classify_link(u)}] {u}" for u in ext))
+        md.append(self._rule("DESCRIPTION"))
+        md.append("*Loading…*" if loading else (store.clean_desc(c.get("description")) or "*(no description)*"))
         hints = c.get("hints") or []
         if hints:
             hl = []
@@ -887,9 +918,8 @@ class Flagship(App):
                     hl.append(f"- **#{h.get('id')}** (unlocked, {tag}): {h['content']}")
                 else:
                     hl.append(f"- **#{h.get('id')}** (locked, {tag}): press `u` to unlock")
-            md.append("**Hints**\n" + "\n".join(hl))
-        md.append("\n---\n")
-        md.append("*Loading…*" if loading else (store.clean_desc(c.get("description")) or "*(no description)*"))
+            md.append(self._rule("HINT(S)"))
+            md.append("\n".join(hl))
         self.query_one("#detail", Markdown).update("\n\n".join(md))
 
     # -- search / filter / sort ---------------------------------------
@@ -902,7 +932,14 @@ class Flagship(App):
         self.query_one("#search", Input).focus()
 
     def action_unfocus(self) -> None:
-        """Esc: leave an input field, give focus back to the challenge list."""
+        """Esc: leave an input field, give focus back to the challenge list. On the search
+        field specifically, Esc also CANCELS the search (clears the term, shows everything
+        again) rather than leaving the filter running."""
+        search = self.query_one("#search", Input)
+        if self.focused is search and search.value:
+            search.value = ""
+            self.search = ""
+            self._rebuild_tree()
         self.set_focus(self.query_one("#tree", Tree))
 
     def action_cycle_filter(self) -> None:
@@ -927,25 +964,24 @@ class Flagship(App):
         self._save_ui_state()
 
     def _update_legend(self) -> None:
-        """Always-visible reminder of the active filter and sort (second legend line)."""
+        """Always-visible reminder of the active filter and sort, on the same row as the
+        (always-on, borderless) search field — so searching never costs extra terminal height."""
+        self.query_one("#legend_icons", Static).update(
+            "[cyan]▣[/cyan] [grey42]▢[/grey42] files    "
+            "[green]●[/green] [grey42]○[/grey42] solved")
         flt, srt = FILTER_LABEL[self.filter_mode], SORT_LABEL[self.sort_mode]
         mark = "[b yellow]" if self.filter_mode != "all" else "[b]"  # highlight an active filter
-        self.query_one("#legend", Static).update(
-            "[cyan]▣[/cyan] [grey42]▢[/grey42] files    "
-            "[green]●[/green] [grey42]○[/grey42] solved\n"
-            f"filter: {mark}{flt}[/]    sort: [b]{srt}[/b]")
+        self.query_one("#legend_labels", Static).update(
+            f"filter: {mark}{flt}[/]    sort: [b]{srt}[/b]    search:")
 
     def _apply_view(self) -> None:
         self._update_legend()
         self._rebuild_tree()
-        solved = sum(1 for c in self.challenges if c.get("solved"))
-        dl = sum(1 for c in self.challenges if c.get("downloaded"))
-        self.sub_title = (f"{solved}/{len(self.challenges)} solved · {dl} downloaded · "
-                          f"{self._view_summary()}")
         self._save_ui_state()
 
     def action_refresh(self) -> None:
         self.notify("Refreshing…", timeout=2)
+        self._fb_backoff = False  # a manual refresh always gets to retry first bloods too
         self.list_worker()
         self.scoreboard_worker()
         self.me_worker()
@@ -1096,6 +1132,9 @@ class Flagship(App):
 
     # -- submission ------------------------------------------------------
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "search":  # Enter: done typing, keep the filter, back to the list
+            self.set_focus(self.query_one("#tree", Tree))
+            return
         if event.input.id != "flag":
             return
         flag = event.value.strip()
@@ -1167,9 +1206,19 @@ class Flagship(App):
     def unlock_worker(self, hint_id: int, cid: int) -> None:
         try:
             self.client.unlock_hint(hint_id)
-            detail = self.client.challenge(cid)
         except CTFdError as e:
             self.call_from_thread(self._emit, f"Unlock failed: {e}", "error")
+            return
+        # the unlock itself succeeded (POST /unlocks: cost already deducted server-side) ; the
+        # detail refetch below is best-effort display only — a failure here must NEVER be
+        # reported as "unlock failed", since the hint genuinely is unlocked at this point
+        try:
+            detail = self.client.challenge(cid)
+        except CTFdError as e:
+            self.call_from_thread(
+                self._emit,
+                f"💡 Hint #{hint_id} unlocked, but couldn't refresh its content ({e}) — press `r`.",
+                "warning", 8)
             return
         self._detail_cache[cid] = detail
         self.call_from_thread(self._emit, f"💡 Hint #{hint_id} unlocked.", "information", 6)

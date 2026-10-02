@@ -15,5 +15,3 @@ AUTO_UNLOCK_FREE_HINTS=false # automatically unlock free (cost 0) hints
 DOWNLOAD_WORKERS=6         # parallel downloads for "Sync all"
 THEME=textual-dark         # start theme (textual-dark, textual-light, nord, gruvbox,
                            #   dracula, tokyo-night, monokai, catppuccin-mocha… ; `t` key to cycle)
-# CTF_END=2026-10-05T18:00 # CTF end for the countdown (epoch or ISO)
-                           #   leave empty/commented = auto-detect via the API (if allowed)

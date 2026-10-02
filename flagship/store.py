@@ -40,11 +40,19 @@ def slugify(name: str) -> str:
     s = _FORBIDDEN.sub("-", name.strip())
     s = _SPACES.sub("-", s)
     s = _DASHES.sub("-", s)
-    return s.strip("-") or "challenge"
+    s = s.strip("-")
+    # "." / ".." as a lone path component is a directory-traversal primitive (`category_dir / ".."`
+    # escapes CHALLENGES/ entirely) ; neither survives sanitisation below, so guard them explicitly
+    if not s or s in (".", ".."):
+        return "challenge"
+    return s
 
 
 def slugify_filename(name: str) -> str:
-    return _FORBIDDEN.sub("_", name).strip() or "download.bin"
+    s = _FORBIDDEN.sub("_", name).strip()
+    if not s or s in (".", ".."):
+        return "download.bin"
+    return s
 
 
 def challenge_dir(base_dir: Path, category: str, name: str) -> Path:
@@ -407,7 +415,7 @@ def list_state(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints
                 all_events.extend(evs)
                 if detail:
                     ch["_detail"] = detail
-            except CTFdError:
+            except Exception:  # noqa: BLE001  (one bad challenge must never abort the whole poll)
                 pass
     save_cache(base_dir, challenges)
     return challenges, all_events
@@ -430,7 +438,7 @@ def sync(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints: bool
             if detail:
                 ch["_detail"] = detail
             return evs
-        except CTFdError:
+        except Exception:  # noqa: BLE001  (one bad challenge must never abort the whole sync)
             ch["downloaded"] = False
             return []
 
@@ -469,7 +477,7 @@ def download_subset(client: CTFd, base_dir: Path, summaries: list[dict], watch: 
             if detail:
                 ch["_detail"] = detail
             return evs
-        except CTFdError:
+        except Exception:  # noqa: BLE001  (one bad challenge must never abort the whole download)
             return []
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
@@ -481,6 +489,47 @@ def download_subset(client: CTFd, base_dir: Path, summaries: list[dict], watch: 
             if progress:
                 progress(done, total)
     return summaries, all_events
+
+
+# ------------------------------------------------------------------ first blood
+def fetch_first_bloods(client: CTFd, challenge_ids: list[int], known: dict[int, str],
+                       workers: int = 6) -> tuple[dict[int, str], int]:
+    """First solver's name for every id in `challenge_ids` not already in `known` (parallel).
+
+    Returns (new_entries, api_errors). Merge `new_entries` into your own cache ; `known` itself
+    is not mutated. A challenge's first blood never changes once set, so callers can cache the
+    result forever (no need to re-fetch on a later sync) — which is why a still-unknown first
+    blood (no recorded solve yet, e.g. a locally-flagged solve the server hasn't caught up with)
+    is NEVER included here: it must stay retriable on the next call, not frozen as "no one"
+    forever.
+
+    `api_errors` counts calls that raised `CTFdError` (as opposed to a clean "no solves yet"),
+    e.g. because the CTF has ended — this endpoint is `@during_ctf_time_only` on CTFd, so EVERY
+    call fails the same way once it's over. Callers should treat "every attempted id errored" as
+    a signal to stop auto-retrying this batch on every poll, not just a handful of "not yet"s.
+    """
+    todo = [cid for cid in dict.fromkeys(challenge_ids) if cid not in known]
+    if not todo:
+        return {}, 0
+    out: dict[int, str] = {}
+    errors = 0
+    lock = threading.Lock()
+
+    def task(cid: int) -> None:
+        nonlocal errors
+        try:
+            name = client.first_blood(cid)
+        except CTFdError:
+            name = None
+            with lock:
+                errors += 1
+        if name is not None:
+            with lock:
+                out[cid] = name
+
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+        list(ex.map(task, todo))
+    return out, errors
 
 
 # ------------------------------------------------------------------ cache (offline mode)
