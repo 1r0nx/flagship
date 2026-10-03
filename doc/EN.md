@@ -17,7 +17,7 @@ submit flags. No browser needed.
 - `d` downloads one challenge, `D` downloads all of them, `C` a whole category.
 - Description or hints changed later? Old `desc.txt` stays, a new `desc2.txt` is saved next to
   it, with what changed.
-- Four tabs: Challenges, Scoreboard, Stats, Notifications.
+- Five tabs: Challenges, Scoreboard, Stats, Flags, Notifications.
 - Search (`/`, lives on the filter/sort line, costs no extra height) matches name, category,
   and the description if it's already cached. Filter (`f`): all, unsolved, solved, bookmarked.
   Sort (`o`, 8 ways: points, solves, name, id...).
@@ -35,6 +35,8 @@ submit flags. No browser needed.
 - Dynamic-value challenges show their point range (initial → minimum). Limited-attempt ones
   show how many you have left. Flags you already tried and got rejected stay listed, so you
   never retype one by mistake.
+- Flags tab: every validated flag so far (category, challenge, points), as long as `flag.txt`
+  was written for it. `P` exports the list to `FLAGS_flagship.md`.
 - Works solo or in a team, same keys either way.
 - CTF over or offline? Shows your last synced data, nothing lost.
 
@@ -115,7 +117,7 @@ flagship ~/ctfs/HeroCTF/config.sh
 | Key | Action |
 |-----|--------|
 | `↑`/`↓`, Enter | navigate, open a challenge (shows the brief, no download) |
-| click tabs | switch between Challenges, Scoreboard, Stats, Notifications |
+| click tabs | switch between Challenges, Scoreboard, Stats, Flags, Notifications |
 | `d` | download/update the selected challenge |
 | `D` | sync all (parallel, progress bar, confirmation) |
 | `C` | download the category under the cursor (confirmation) |
@@ -132,6 +134,7 @@ flagship ~/ctfs/HeroCTF/config.sh
 | `w` | open the challenge folder |
 | `e` | edit challenge notes (`notes.md`) |
 | `p` | export to `PROGRESS_flagship.md` |
+| `P` | export the Flags tab to `FLAGS_flagship.md` |
 | `Esc` | leave the field you're in; on search, also clears it |
 | drag `┃` | resize list/detail panes (double-click: reset) |
 | `Tab` / `Shift+Tab` | move focus |

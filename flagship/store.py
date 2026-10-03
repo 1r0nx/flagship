@@ -578,6 +578,16 @@ def write_flag(path, flag: str) -> None:
         p.write_text(flag.strip() + "\n", encoding="utf-8")
 
 
+def read_flag(path) -> str | None:
+    """The validated flag for a challenge, if `flag.txt` was written (None otherwise)."""
+    if not path:
+        return None
+    try:
+        return (Path(path) / "flag.txt").read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
 # ------------------------------------------------------------ flag attempts
 def _attempts_path(base_dir: Path) -> Path:
     return base_dir / ".flagship" / "attempts.json"
@@ -646,5 +656,26 @@ def write_progress(base_dir: Path, challenges: list[dict], ctf_name: str = "CTF"
             f"{'✓' if c.get('downloaded') else ''} |")
     # DISTINCT name: never overwrite a PROGRESS.md the user maintains by hand
     out = base_dir / "PROGRESS_flagship.md"
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out
+
+
+def write_flags(base_dir: Path, challenges: list[dict], ctf_name: str = "CTF") -> Path:
+    """Generate a FLAGS_flagship.md listing every validated flag (flag.txt on disk)."""
+    rows = []
+    for c in challenges:
+        flag = read_flag(c.get("path"))
+        if flag:
+            rows.append((c.get("category", "?"), c.get("name", "?"), c.get("value", ""), flag))
+    rows.sort(key=lambda r: (r[0], r[1]))
+    lines = [
+        f"# Flags · {ctf_name}", "",
+        f"{len(rows)} validated flag(s) · generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}", "",
+        "| Category | Challenge | Points | Flag |",
+        "|----------|-----------|--------|------|",
+    ]
+    for cat, name, value, flag in rows:
+        lines.append(f"| {cat} | {name} | {value} | `{flag}` |")
+    out = base_dir / "FLAGS_flagship.md"
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out

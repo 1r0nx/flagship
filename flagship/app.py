@@ -1,9 +1,9 @@
 """Flagship: Textual TUI for a CTFd instance.
 
-Challenges / Scoreboard / Stats / Notifications tabs; light listing by default, download on demand
-(`d`), per category (`C`) or full (`D`, parallel + progress bar); search, sort, filters;
-flag submission, hint unlock, copy connection info, external notes, PROGRESS_flagship.md export;
-notifications (toasts + log + history). The token is never displayed.
+Challenges / Scoreboard / Stats / Flags / Notifications tabs; light listing by default, download on
+demand (`d`), per category (`C`) or full (`D`, parallel + progress bar); search, sort, filters;
+flag submission, hint unlock, copy connection info, external notes, PROGRESS_flagship.md and
+FLAGS_flagship.md export; notifications (toasts + log + history). The token is never displayed.
 
 Usage: python -m flagship [path/config.sh]
 """
@@ -393,8 +393,13 @@ class Flagship(App):
     #flag { height: 3; border: solid $accent; padding: 0 1; }
     #progress { dock: bottom; height: 1; display: none; }
     #scoreboard { height: 1fr; }
+    /* hide the horizontal scrollbar (long rows still scroll via wheel/keys, just stay truncated) */
+    #flags { height: 1fr; scrollbar-size-horizontal: 0; }
     #stats { padding: 0 1; }
     #notifs { padding: 0 1; }
+    /* toasts default to bottom-right, right over the flag field ; top-right stays clear */
+    ToastRack { dock: top; align: right top; }
+    ToastHolder { align-horizontal: right; }
     """
 
     BINDINGS = [
@@ -414,6 +419,7 @@ class Flagship(App):
         ("w", "open_folder", "Folder"),
         ("e", "edit_notes", "Notes"),
         ("p", "export_progress", "Progress"),
+        ("P", "export_flags", "Flags"),
         ("q", "quit", "Quit"),
         Binding("escape", "unfocus", "Leave field", show=False),
     ]
@@ -471,6 +477,8 @@ class Flagship(App):
             with TabPane("Stats", id="tab-stats"):
                 with VerticalScroll():
                     yield Markdown("*Statistics…*", id="stats", open_links=False)
+            with TabPane("Flags", id="tab-flags"):
+                yield DataTable(id="flags")
             with TabPane("Notifications", id="tab-notifs"):
                 with VerticalScroll():
                     yield Static("No notifications.", id="notifs")
@@ -482,6 +490,9 @@ class Flagship(App):
         dt = self.query_one("#scoreboard", DataTable)
         dt.add_columns("#", "Team / Player", "Score")
         dt.cursor_type = "row"
+        fdt = self.query_one("#flags", DataTable)
+        fdt.add_columns("Category", "Challenge", "Points", "Flag")
+        fdt.cursor_type = "row"
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
         cached_fb = store.load_json(self.cfg.base_dir, "fb_cache.json", {}) or {}
         self._fb_cache = {int(k): v for k, v in cached_fb.items()}
@@ -613,6 +624,20 @@ class Flagship(App):
         active filter/sort are all shown elsewhere already (Stats tab, legend row), so this line
         stays uncluttered."""
         self.title = "Flagship"
+
+    def _render_flags(self) -> None:
+        """Update the Flags tab: every solved challenge with a `flag.txt` written on disk."""
+        try:
+            dt = self.query_one("#flags", DataTable)
+        except Exception:  # noqa: BLE001  (widget not mounted yet)
+            return
+        dt.clear()
+        rows = [(c.get("category", "?"), c.get("name", "?"), c.get("value", ""), store.read_flag(c.get("path")))
+                for c in self.challenges]
+        rows = [r for r in rows if r[3]]
+        rows.sort(key=lambda r: (r[0], r[1]))
+        for cat, name, value, flag in rows:
+            dt.add_row(cat, name, str(value), flag)
 
     def _render_stats(self) -> None:
         try:
@@ -876,6 +901,7 @@ class Flagship(App):
             self._tree_sig = sig
             self._rebuild_tree()
         self._render_stats()
+        self._render_flags()
         self.fb_worker()
 
         for ev in events or []:
@@ -1278,6 +1304,17 @@ class Flagship(App):
             self._emit(f"PROGRESS export failed: {e}", "error")
             return
         self._emit(f"📄 Progress exported: {p}", "information", 5)
+
+    def action_export_flags(self) -> None:
+        if not self.challenges:
+            self.notify("Nothing to export.", severity="warning")
+            return
+        try:
+            p = store.write_flags(self.cfg.base_dir, self.challenges, self.cfg.ctf_name)
+        except OSError as e:
+            self._emit(f"Flags export failed: {e}", "error")
+            return
+        self._emit(f"🚩 Flags exported: {p}", "information", 5)
 
     # -- copy connection / notes ---------------------------------------
     def action_copy_conn(self) -> None:

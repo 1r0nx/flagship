@@ -17,7 +17,7 @@ résolu, permet de soumettre des flags. Pas besoin de navigateur.
 - `d` télécharge un challenge, `D` les télécharge tous, `C` une catégorie entière.
 - Description ou indices modifiés plus tard ? L'ancien `desc.txt` reste, un nouveau
   `desc2.txt` est créé à côté, avec ce qui a changé.
-- Quatre onglets : Challenges, Scoreboard, Stats, Notifications.
+- Cinq onglets : Challenges, Scoreboard, Stats, Flags, Notifications.
 - Recherche (`/`, intégrée à la ligne filtre/tri, ne prend aucune hauteur en plus) : nom,
   catégorie, et la description si elle est déjà en cache. Filtre (`f`) : all, unsolved, solved,
   bookmarked. Tri (`o`, 8 modes : points, solves, nom, id...).
@@ -36,6 +36,8 @@ résolu, permet de soumettre des flags. Pas besoin de navigateur.
 - Les challenges à points dynamiques affichent leur plage (initial → minimum). Ceux à essais
   limités affichent combien il t'en reste. Les flags déjà tentés et refusés restent listés,
   pour ne jamais en retaper un par erreur.
+- Onglet Flags : tous les flags validés jusqu'ici (catégorie, challenge, points), à condition
+  que `flag.txt` ait été écrit. `P` exporte la liste vers `FLAGS_flagship.md`.
 - Marche pareil en solo ou en équipe.
 - CTF fini ou hors-ligne ? Flagship réaffiche la dernière synchro, rien n'est perdu.
 
@@ -117,7 +119,7 @@ flagship ~/ctfs/HeroCTF/config.sh
 | Touche | Action |
 |--------|--------|
 | `↑`/`↓`, Entrée | naviguer, ouvrir un challenge (énoncé affiché, sans téléchargement) |
-| clic sur les onglets | basculer entre Challenges, Scoreboard, Stats, Notifications |
+| clic sur les onglets | basculer entre Challenges, Scoreboard, Stats, Flags, Notifications |
 | `d` | télécharger/mettre à jour le challenge sélectionné |
 | `D` | tout synchroniser (parallèle, barre de progression, confirmation) |
 | `C` | télécharger la catégorie sous le curseur (confirmation) |
@@ -134,6 +136,7 @@ flagship ~/ctfs/HeroCTF/config.sh
 | `w` | ouvrir le dossier du challenge |
 | `e` | éditer les notes (`notes.md`) |
 | `p` | exporter vers `PROGRESS_flagship.md` |
+| `P` | exporter l'onglet Flags vers `FLAGS_flagship.md` |
 | `Échap` | quitter le champ actif ; sur la recherche, l'efface aussi |
 | glisser `┃` | redimensionner liste/détail (double-clic : réinitialiser) |
 | `Tab` / `Maj+Tab` | déplacer le focus |
