@@ -661,21 +661,25 @@ def write_progress(base_dir: Path, challenges: list[dict], ctf_name: str = "CTF"
 
 
 def write_flags(base_dir: Path, challenges: list[dict], ctf_name: str = "CTF") -> Path:
-    """Generate a FLAGS_flagship.md listing every validated flag (flag.txt on disk)."""
+    """Generate a FLAGS_flagship.md listing every SOLVED challenge, with its flag when a flag.txt
+    holds one (a teammate's solve shows as "(unknown)" until you save the flag yourself)."""
     rows = []
     for c in challenges:
+        if not c.get("solved"):
+            continue
         flag = read_flag(c.get("path"))
-        if flag:
-            rows.append((c.get("category", "?"), c.get("name", "?"), c.get("value", ""), flag))
+        rows.append((c.get("category", "?"), c.get("name", "?"), c.get("value", ""), flag))
     rows.sort(key=lambda r: (r[0], r[1]))
+    known = sum(1 for r in rows if r[3])
     lines = [
         f"# Flags · {ctf_name}", "",
-        f"{len(rows)} validated flag(s) · generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}", "",
+        f"{len(rows)} solved · {known} flag(s) recorded · "
+        f"generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}", "",
         "| Category | Challenge | Points | Flag |",
         "|----------|-----------|--------|------|",
     ]
     for cat, name, value, flag in rows:
-        lines.append(f"| {cat} | {name} | {value} | `{flag}` |")
+        lines.append(f"| {cat} | {name} | {value} | {('`'+flag+'`') if flag else '(unknown)'} |")
     out = base_dir / "FLAGS_flagship.md"
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out

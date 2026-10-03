@@ -35,8 +35,10 @@ submit flags. No browser needed.
 - Dynamic-value challenges show their point range (initial → minimum). Limited-attempt ones
   show how many you have left. Flags you already tried and got rejected stay listed, so you
   never retype one by mistake.
-- Flags tab: every validated flag so far (category, challenge, points), as long as `flag.txt`
-  was written for it. `P` exports the list to `FLAGS_flagship.md`.
+- Flags tab: every solved challenge (category, challenge, points), with its flag when a
+  `flag.txt` holds one. In team mode a teammate's solve shows as solved with an `(unknown)`
+  flag until you save the flag yourself in the challenge folder. `P` exports the list to
+  `FLAGS_flagship.md`.
 - Works solo or in a team, same keys either way.
 - CTF over or offline? Shows your last synced data, nothing lost.
 

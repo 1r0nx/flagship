@@ -36,8 +36,10 @@ résolu, permet de soumettre des flags. Pas besoin de navigateur.
 - Les challenges à points dynamiques affichent leur plage (initial → minimum). Ceux à essais
   limités affichent combien il t'en reste. Les flags déjà tentés et refusés restent listés,
   pour ne jamais en retaper un par erreur.
-- Onglet Flags : tous les flags validés jusqu'ici (catégorie, challenge, points), à condition
-  que `flag.txt` ait été écrit. `P` exporte la liste vers `FLAGS_flagship.md`.
+- Onglet Flags : tous les challenges résolus (catégorie, challenge, points), avec leur flag
+  quand un `flag.txt` en contient un. En mode équipe, le solve d'un coéquipier apparaît comme
+  résolu avec un flag `(unknown)` tant que tu n'as pas écrit le flag toi-même dans le dossier
+  du challenge. `P` exporte la liste vers `FLAGS_flagship.md`.
 - Marche pareil en solo ou en équipe.
 - CTF fini ou hors-ligne ? Flagship réaffiche la dernière synchro, rien n'est perdu.
 

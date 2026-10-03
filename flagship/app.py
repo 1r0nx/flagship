@@ -626,15 +626,17 @@ class Flagship(App):
         self.title = "Flagship"
 
     def _render_flags(self) -> None:
-        """Update the Flags tab: every solved challenge with a `flag.txt` written on disk."""
+        """Update the Flags tab: every solved challenge, showing its flag when a `flag.txt` holds
+        one. A teammate's solve (team mode) shows as solved with an "(unknown)" flag until you save
+        the flag yourself in the challenge folder."""
         try:
             dt = self.query_one("#flags", DataTable)
         except Exception:  # noqa: BLE001  (widget not mounted yet)
             return
         dt.clear()
-        rows = [(c.get("category", "?"), c.get("name", "?"), c.get("value", ""), store.read_flag(c.get("path")))
-                for c in self.challenges]
-        rows = [r for r in rows if r[3]]
+        rows = [(c.get("category", "?"), c.get("name", "?"), c.get("value", ""),
+                 store.read_flag(c.get("path")) or "(unknown)")
+                for c in self.challenges if c.get("solved")]
         rows.sort(key=lambda r: (r[0], r[1]))
         for cat, name, value, flag in rows:
             dt.add_row(cat, name, str(value), flag)
