@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flagship"
+version = "0.2.0"
+description = "TUI pour CTFd : sync des challenges, parcours, soumission de flags"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "textual>=0.86",
+    "requests>=2.28",
+    "gdown>=5.0",
+]
+
+[project.scripts]
+flagship = "flagship.app:main"
+
+[tool.setuptools]
+packages = ["flagship"]

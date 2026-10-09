@@ -1,0 +1,19 @@
+# secret — ne jamais versionner le token
+config.sh
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# packaging
+*.egg-info/
+build/
+dist/
+
+# au cas où tu lances Flagship avec BASE_DIR=. dans CE dossier (déconseillé) :
+.flagship/
+CHALLENGES/
+
+# éditeur de notes (Obsidian)
+.obsidian/

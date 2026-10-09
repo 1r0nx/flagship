@@ -1,0 +1,19 @@
+# Copy this file to `config.sh` and fill it in.
+# (never commit config.sh to a repository: it holds the token)
+
+URL=https://ctf.example.com          # CTFd URL
+CTFD_TOKEN=ctfd_xxxxxxxxxxxxxxxxxxx  # the token (Settings > Access Tokens)
+
+# --- optional ---
+CTF_NAME=MyCTF             # displayed name + default folder
+BASE_DIR=./MyCTF           # root where folders are generated (relative to config.sh)
+POLL_INTERVAL=60           # auto-sync every N seconds (0 = disabled)
+WRITE_FLAG_ON_SOLVE=true   # write flag.txt when a flag is accepted in the TUI
+WATCH_CHANGES=true         # detect description/hint changes (desc2.txt, desc3.txt...)
+                           #   set to false for a lighter sync (fewer requests)
+AUTO_UNLOCK_FREE_HINTS=false # automatically unlock free (cost 0) hints
+DOWNLOAD_WORKERS=6         # parallel downloads for "Sync all"
+THEME=textual-dark         # start theme (textual-dark, textual-light, nord, gruvbox,
+                           #   dracula, tokyo-night, monokai, catppuccin-mocha… ; `t` key to cycle)
+EDITOR=nano                # editor for notes.md (`e` key); e.g. vim, subl, code
+                           #   empty -> use $EDITOR / $VISUAL, else nano
