@@ -936,16 +936,28 @@ class Flagship(App):
             dt = self.query_one("#flags", DataTable)
         except Exception:  # noqa: BLE001  (widget not mounted yet)
             return
-        dt.clear()
         rows = [(c.get("category", "?"), c.get("name", "?"), c.get("value", ""),
                  store.read_flag(c.get("path")) or "(unknown)")
                 for c in self.challenges if c.get("solved")]
         rows.sort(key=lambda r: (r[0], r[1]))
+        # only rebuild when the flags really change: a poll that changes nothing must NOT clear
+        # the table (clear() resets the scroll to the top). Saves work too.
+        sig = tuple(rows)
+        if sig == getattr(self, "_flags_sig", None):
+            return
+        self._flags_sig = sig
+        y = dt.scroll_y                     # preserve the scroll position across the rebuild
+        dt.clear()
         # category per row (same order) so the highlighted row can be coloured by category
         self._flag_rowcats = [r[0] for r in rows]
         self._flags_hl_row = None
         for cat, name, value, flag in rows:
             dt.add_row(cat, name, str(value), flag)
+        try:                                # restore the scroll (clamped if fewer rows now)
+            dt.scroll_y = y
+            self.call_after_refresh(lambda: setattr(dt, "scroll_y", y))
+        except Exception:  # noqa: BLE001
+            pass
 
     # Fallback palette (used before any challenge is loaded).
     _CAT_COLORS = [
