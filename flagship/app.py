@@ -1686,8 +1686,8 @@ class Flagship(App):
                     data={"_cat": cat}, expand=cat not in self.collapsed_cats)
                 for c in items:
                     # column 1 = downloaded (square/box) · column 2 = solved (circle)
-                    mark = "[b green]●[/b green]" if c.get("solved") else "[grey42]○[/grey42]"
-                    dlm = "[b cyan]▣[/b cyan]" if c.get("downloaded") else "[grey42]▢[/grey42]"
+                    mark = "[b white]●[/b white]" if c.get("solved") else "[grey42]○[/grey42]"
+                    dlm = "[b white]▣[/b white]" if c.get("downloaded") else "[grey42]▢[/grey42]"
                     star = "[yellow]★[/yellow] " if int(c.get("id", -1)) in self.bookmarked else ""
                     slv = c.get("solves")
                     stail = f"   [dim]{c.get('value','')}pt · {slv} solves[/dim]" if slv is not None else f"   [dim]{c.get('value','')}pt[/dim]"
@@ -1976,8 +1976,8 @@ class Flagship(App):
         """Always-visible reminder of the active filter and sort, on the same row as the
         (always-on, borderless) search field, so searching never costs extra terminal height."""
         self.query_one("#legend_icons", Static).update(
-            "[cyan]▣[/cyan] [grey42]▢[/grey42] files    "
-            "[green]●[/green] [grey42]○[/grey42] solved    "
+            "[white]▣[/white] [grey42]▢[/grey42] files    "
+            "[white]●[/white] [grey42]○[/grey42] solved    "
             "[yellow]★[/yellow] bookmarked (`b`)")
         flt, srt = FILTER_LABEL[self.filter_mode], SORT_LABEL[self.sort_mode]
         mark = "[b yellow]" if self.filter_mode != "all" else "[b]"  # highlight an active filter
