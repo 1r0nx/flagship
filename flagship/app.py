@@ -816,6 +816,17 @@ class Flagship(App):
         except Exception:  # noqa: BLE001  (not mounted yet)
             pass
         self._render_log()
+        # toast (top-right) showing the current state on each press
+        if self._log_full:
+            try:
+                n = len(self._log_path.read_text(encoding="utf-8").splitlines())
+            except OSError:
+                n = len(self.notifications)
+            self.notify(f"📜 Logs: whole file ({n} lines)", timeout=3)
+        else:
+            self.notify(
+                f"📜 Logs: last {len(self.notifications)} lines", timeout=3
+            )
 
     def _apply_notifs(self, items: list[dict], initial: bool = False) -> None:
         """Store the platform announcements and render them. After the first batch is known,
