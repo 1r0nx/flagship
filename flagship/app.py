@@ -29,6 +29,7 @@ from textual.widgets import (
     TabbedContent, TabPane, Button, ProgressBar,
 )
 from textual import work
+from textual.worker import get_current_worker
 from textual.binding import Binding
 from textual.strip import Strip
 from textual.coordinate import Coordinate
@@ -728,6 +729,18 @@ class Flagship(App):
     def on_unmount(self) -> None:
         self._save_ui_state()
 
+    async def action_quit(self) -> None:
+        """Quit near-instantly. Shutdown joins the thread-worker executor, so a long per-challenge
+        poll in flight (one network GET per downloaded challenge) would hold the terminal until the
+        whole batch finished. Cancel the workers first: the poll loop checks the cancel flag and
+        breaks after the current request, so the join waits for at most one request, not all."""
+        self._save_ui_state()
+        try:
+            self.workers.cancel_all()
+        except Exception:  # noqa: BLE001  (never block quitting on a cancel hiccup)
+            pass
+        self.exit()
+
     def on_resize(self, event: events.Resize) -> None:
         self._update_me_sticky()  # the visible-rows count changed
 
@@ -871,9 +884,16 @@ class Flagship(App):
     def list_worker(self) -> None:
         if self._syncing:  # a full sync is running: do not interfere
             return
+        worker = get_current_worker()
         try:
             challenges, events = store.list_state(
-                self.client, self.cfg.base_dir, self.cfg.watch_changes, self.cfg.auto_unlock_free_hints)
+                self.client, self.cfg.base_dir, self.cfg.watch_changes, self.cfg.auto_unlock_free_hints,
+                should_stop=lambda: worker.is_cancelled, workers=self.cfg.download_workers,
+                on_connected=lambda: None if worker.is_cancelled else self.call_from_thread(self._set_conn, True),
+                on_listed=lambda chs: None if worker.is_cancelled else (
+                    self.call_from_thread(self._set_conn, True),
+                    # render the full list now (same list object the watch loop then enriches in place)
+                    self.call_from_thread(self._apply_challenges, chs, [])))
         except CTFdError as e:
             # diagnosis: valid token but challenges unreachable (CTF over/hidden)?
             hint = ""
@@ -891,8 +911,11 @@ class Flagship(App):
             else:
                 self.call_from_thread(self._emit, f"Cannot list challenges: {e}{hint}", "error", 8)
             return
-        self.call_from_thread(self._set_conn, True)
-        self.call_from_thread(self._apply_challenges, challenges, events)
+        if worker.is_cancelled:  # app is quitting: don't touch the UI from a dying thread
+            return
+        # the list was already rendered by on_listed; only fold in the details/events the watch
+        # loop gathered, instead of re-applying the whole list a second time.
+        self.call_from_thread(self._apply_watch_results, challenges, events)
 
     @work(thread=True, exclusive=True, group="me")
     def me_worker(self) -> None:
@@ -1608,6 +1631,24 @@ class Flagship(App):
             self._reselect_last()
         self._first_sync = False
 
+    def _apply_watch_results(self, challenges: list[dict], events: list[dict] | None = None) -> None:
+        """Light follow-up to a poll, run after the watch loop. The list was already rendered by
+        on_listed and the marks it shows (solved/downloaded/value/solves) don't change here, so we
+        skip the tree/stats rebuild: just cache the freshly fetched details, surface desc/hint
+        change events, and re-render the open challenge if its detail was refreshed."""
+        for c in challenges:
+            if c.get("_detail"):
+                self._detail_cache[int(c["id"])] = c["_detail"]
+        for ev in events or []:
+            if ev.get("kind") == "desc":
+                self._emit(f"✏️  {ev['name']}: {ev['msg']}", "warning", 7)
+            elif ev.get("kind") == "hint":
+                self._emit(f"💡 {ev['name']}: {ev['msg']}", "information", 6)
+        if self.selected:
+            cid = int(self.selected["id"])
+            if cid in self._detail_cache:
+                self._render_detail({**self.selected, **self._detail_cache[cid]})
+
     def _refresh_detail_width(self) -> None:
         """Re-render the current detail so its section dividers re-center after a pane resize."""
         if not self.selected:
@@ -1624,7 +1665,28 @@ class Flagship(App):
                 self.selected = c
                 self._render_detail(c, loading=True)
                 self.detail_worker(int(c["id"]))
+                # defer: right after a rebuild the tree's line numbers aren't computed yet, so
+                # move_cursor would target line -1 (cursor nowhere). Place it after the refresh.
+                self.call_after_refresh(self._place_cursor_on, int(c["id"]))
                 break
+
+    def _place_cursor_on(self, cid: int) -> None:
+        """Move the tree cursor onto the challenge `cid` so the list reopens on the last
+        challenge instead of with the cursor nowhere. If its category is collapsed, expand
+        it first, otherwise the cursor would land on a hidden line and show nothing."""
+        tree = self.query_one("#tree", Tree)
+        for cat_node in tree.root.children:
+            for leaf in cat_node.children:
+                d = leaf.data
+                if d and "_cat" not in d and int(d.get("id", -1)) == cid:
+                    if not cat_node.is_expanded:
+                        cat_node.expand()  # fires on_tree_node_expanded -> drops it from collapsed_cats
+                    try:
+                        _ = tree._tree_lines  # force (re)build so leaf._line is valid before move
+                    except Exception:  # noqa: BLE001
+                        pass
+                    tree.move_cursor(leaf)
+                    return
 
     # -- tree -----------------------------------------------------------
     def _sort_key(self, c: dict):
@@ -1667,6 +1729,10 @@ class Flagship(App):
 
     def _rebuild_tree(self) -> None:
         tree = self.query_one("#tree", Tree)
+        # remember which challenge the cursor was on: tree.clear() loses it, so a background
+        # poll rebuild would otherwise wipe the highlight. Restore it after the rebuild.
+        prev = tree.cursor_node
+        prev_id = int(prev.data["id"]) if (prev and prev.data and "_cat" not in prev.data) else None
         self._building = True
         try:
             tree.clear()
@@ -1694,6 +1760,12 @@ class Flagship(App):
                     node.add_leaf(f"{dlm} {mark}  {star}{c.get('name','?')}{stail}", data=c)
         finally:
             self._building = False
+        # re-pin the cursor on the same challenge (or the selected one as a fallback), deferred
+        # so the tree's line numbers are recomputed first.
+        restore_id = prev_id if prev_id is not None else (
+            int(self.selected["id"]) if self.selected else None)
+        if restore_id is not None:
+            self.call_after_refresh(self._place_cursor_on, restore_id)
 
     def on_tree_node_collapsed(self, event: Tree.NodeCollapsed) -> None:
         d = event.node.data

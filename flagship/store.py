@@ -402,27 +402,68 @@ def download_one(client, base_dir, summary, watch=True, auto_free_hints=False):
     return str(d), events
 
 
-def list_state(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints: bool = False):
-    """LIGHT mode: list without downloading. Re-checks changes for already-downloaded ones."""
+def list_state(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints: bool = False,
+               should_stop=None, on_connected=None, on_listed=None, workers: int = 6):
+    """LIGHT mode: list without downloading. Re-checks changes for already-downloaded ones.
+
+    `should_stop` is an optional callable: when it returns True (e.g. the app is quitting), the
+    per-challenge watch loop breaks after the current request instead of walking every challenge.
+    This keeps quit near-instant on CTFs with many downloaded challenges (each one is a network GET).
+
+    `on_connected` is an optional callable fired once the list is fetched, i.e. as soon as the
+    platform is proven reachable, BEFORE the slow per-challenge watch loop. It lets the UI flip to
+    "Online" immediately instead of after every challenge's detail GET.
+
+    `on_listed(challenges)` is an optional callable fired once the cheap downloaded/solved flags are
+    set (no network), BEFORE the watch loop, so the UI can render the full list right away instead
+    of waiting for every challenge's detail GET."""
     base_dir.mkdir(parents=True, exist_ok=True)
     challenges = client.challenges()
     solved = client.solved_ids()
+    if on_connected:  # list reachable = online, don't wait for the per-challenge watch loop below
+        on_connected()
     assign_paths(challenges, base_dir)
-    all_events = []
+    # cheap first pass (filesystem + set membership, no network): enough to render the list now
     for ch in challenges:
         d = Path(ch["path"])
-        downloaded = (d / "desc.txt").exists()
-        ch["downloaded"] = downloaded
+        ch["downloaded"] = (d / "desc.txt").exists()
         ch["solved"] = int(ch.get("id", -1)) in solved or _has_flag(str(d))
-        if downloaded and watch:
+    if on_listed:
+        on_listed(challenges)
+    # watch loop: one network GET per downloaded challenge to detect desc/hint changes. Run in
+    # parallel (each challenge has its own folder, so the writes don't collide) to keep the
+    # background refresh short.
+    all_events = []
+    stopped = False
+    if watch:
+        todo = [ch for ch in challenges if ch["downloaded"]]
+
+        def _watch_one(ch):
+            if should_stop and should_stop():  # queued task reached after a quit: skip the GET
+                return []
             try:
                 _, evs, detail = ensure_challenge(client, base_dir, ch, True, auto_free_hints)
-                all_events.extend(evs)
                 if detail:
                     ch["_detail"] = detail
+                return evs
             except Exception:  # noqa: BLE001  (one bad challenge must never abort the whole poll)
-                pass
-    save_cache(base_dir, challenges)
+                return []
+
+        if todo:
+            ex = ThreadPoolExecutor(max_workers=max(1, min(workers, len(todo))))
+            futs = [ex.submit(_watch_one, ch) for ch in todo]
+            try:
+                for fut in as_completed(futs):
+                    if should_stop and should_stop():  # quitting: stop collecting, cancel the rest
+                        stopped = True
+                        break
+                    all_events.extend(fut.result() or [])
+            finally:
+                # on a quit, don't wait for the in-flight GETs (cancel the queued ones): the join
+                # would hold the terminal. Otherwise wait so every detail is folded in.
+                ex.shutdown(wait=not stopped, cancel_futures=True)
+    if not stopped:  # don't persist a half-walked list (some challenges may miss their _detail)
+        save_cache(base_dir, challenges)
     return challenges, all_events
 
 
