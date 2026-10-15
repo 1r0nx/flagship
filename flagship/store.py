@@ -230,6 +230,15 @@ def _dropbox_direct(url: str) -> str:
     return url + ("&dl=1" if "?" in url else "?dl=1")
 
 
+def _looks_like_page(r: requests.Response) -> bool:
+    """True if the response is a web page (HTML), not a downloadable file.
+    A page link is kept in desc.txt but NOT saved into work/."""
+    if "attachment" in r.headers.get("Content-Disposition", "").lower():
+        return False  # server explicitly offers a file to save
+    ctype = r.headers.get("Content-Type", "").split(";")[0].strip().lower()
+    return ctype.startswith("text/html") or ctype == "application/xhtml+xml"
+
+
 def download_external(url: str, dest_dir: Path, max_bytes: int = MAX_BYTES) -> tuple[str, str]:
     """Download an external link (NEVER with CTFd auth). (status, detail)."""
     kind = classify_link(url)
@@ -274,6 +283,9 @@ def download_external(url: str, dest_dir: Path, max_bytes: int = MAX_BYTES) -> t
         r.raise_for_status()
     except requests.RequestException as e:
         return "error", str(e)
+    if _looks_like_page(r):  # a web page, not a file: keep the link in desc.txt only
+        r.close()
+        return "page", "web page, left in desc.txt (not downloaded)"
     size = int(r.headers.get("Content-Length") or 0)
     if size and size > max_bytes:
         r.close()
@@ -304,6 +316,7 @@ def _do_downloads(client, d: Path, detail, file_urls, ext_links) -> list[str]:
         (d / "downloads.txt").write_text(
             "# Flagship download report (files -> work/)\n"
             "# ok = downloaded · skip = already present (not overwritten) · "
+            "page = web page (kept in desc.txt, not saved) · "
             "manual = to be done by hand (link in desc.txt) · error\n\n"
             + "\n".join(report) + "\n", encoding="utf-8")
     return report
