@@ -15,9 +15,13 @@ per-challenge notes. Flagship does all of it for you.
 
 ![Scoreboard](img/scoreboard.png)
 
-**Stats**
+**Stats (solo CTF)**
 
-![Stats](img/stats.png)
+![Stats (solo)](img/stats-solo-ctf.png)
+
+**Stats (team CTF)**
+
+![Stats (team)](img/stats-team-ctf.png)
 
 **Flags**
 

@@ -15,9 +15,13 @@ résolutions, tenir des notes par challenge. Flagship fait tout ça pour toi.
 
 ![Scoreboard](img/scoreboard.png)
 
-**Stats**
+**Stats (CTF solo)**
 
-![Stats](img/stats.png)
+![Stats (solo)](img/stats-solo-ctf.png)
+
+**Stats (CTF en équipe)**
+
+![Stats (équipe)](img/stats-team-ctf.png)
 
 **Flags**
 
