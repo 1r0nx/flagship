@@ -18,6 +18,7 @@ The token is never displayed nor executed (no shell `source`; plain KEY=value pa
 """
 
 from __future__ import annotations
+
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -80,7 +81,7 @@ class Config:
     config_dir: Path  # folder holding config.sh (reference for displaying paths relatively)
 
     @classmethod
-    def load(cls, path: str | Path) -> "Config":
+    def load(cls, path: str | Path) -> Config:
         path = Path(path).expanduser().resolve()
         if not path.exists():
             raise FileNotFoundError(f"config not found: {path}")

@@ -145,6 +145,7 @@ Each challenge gets a `downloads.txt` report where every line carries a status:
 | -------- | ------------------------------------------------------------------- |
 | `ok`     | file downloaded into `work/`                                        |
 | `skip`   | already present, not overwritten                                    |
+| `page`   | a web page (not a file): kept in `desc.txt`, not downloaded          |
 | `manual` | fetch it by hand (link in `desc.txt`): > 2 GB, private Drive, MEGA… |
 | `error`  | the download failed                                                 |
 

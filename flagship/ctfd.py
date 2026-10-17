@@ -5,7 +5,9 @@ with a message the TUI can display.
 """
 
 from __future__ import annotations
+
 import os
+
 import requests
 
 
@@ -91,13 +93,17 @@ class CTFd:
         fails in solo mode (teams disabled): we then fall back to the user.
         """
         if self._account_base is None:
-            self._account_base = "/api/v1/users/me"
+            # resolve fully BEFORE publishing the result: a provisional "/users/me" would let a
+            # concurrent caller (me_worker vs list_worker share the client) read it and query the
+            # USER's solves instead of the TEAM's, under-counting solved in team mode.
+            base = "/api/v1/users/me"
             try:
                 d = self._get("/api/v1/teams/me").get("data") or {}
                 if d.get("id"):
-                    self._account_base = "/api/v1/teams/me"
+                    base = "/api/v1/teams/me"
             except CTFdError:
                 pass
+            self._account_base = base
         return self._account_base
 
     def is_team_mode(self) -> bool:
@@ -285,7 +291,7 @@ class CTFd:
         return file_path if file_path.startswith("http") else self.url + file_path
 
 
-def _stream_to(r: "requests.Response", dest, max_bytes: int) -> tuple[str, str]:
+def _stream_to(r: requests.Response, dest, max_bytes: int) -> tuple[str, str]:
     """Write the stream to dest while honouring a max size (2 GB safeguard)."""
     written = 0
     try:

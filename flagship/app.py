@@ -10,39 +10,51 @@ Usage: python -m flagship [path/config.sh]
 """
 
 from __future__ import annotations
+
+import colorsys
 import json
 import os
 import shlex
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
-import colorsys
 import zlib
+from datetime import datetime, timezone
 from pathlib import Path
 
-from textual.app import App, ComposeResult
-from textual.containers import Horizontal, VerticalScroll, Vertical
-from textual.screen import ModalScreen
-from textual.widgets import (
-    Header, Footer, Tree, Markdown, Input, Static, DataTable,
-    TabbedContent, TabPane, Button, ProgressBar,
-)
-from textual import work
-from textual.worker import get_current_worker
-from textual.binding import Binding
-from textual.strip import Strip
-from textual.coordinate import Coordinate
-from textual.widget import Widget
-from textual import events
-from rich.text import Text
-from rich.markup import escape
-from rich.console import Group
-from rich.table import Table
 from rich import box
+from rich.align import Align
+from rich.cells import cell_len
+from rich.columns import Columns
+from rich.console import Group
+from rich.markup import escape
+from rich.panel import Panel
 from rich.segment import Segment
 from rich.style import Style
-from rich.cells import cell_len
+from rich.table import Table
+from rich.text import Text
+from textual import events, work
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.coordinate import Coordinate
+from textual.screen import ModalScreen
+from textual.strip import Strip
+from textual.widget import Widget
+from textual.widgets import (
+    Button,
+    DataTable,
+    Footer,
+    Header,
+    Input,
+    Markdown,
+    ProgressBar,
+    Static,
+    TabbedContent,
+    TabPane,
+    Tree,
+)
+from textual.worker import get_current_worker
 
 
 def _fmt_when(raw: str | None) -> str:
@@ -71,9 +83,9 @@ class _CenterRule:
         left = (w - 1) // 2
         yield Text("─" * left + "o" + "─" * (w - 1 - left), style="dim")
 
+from . import store
 from .config import Config
 from .ctfd import CTFd, CTFdError
-from . import store
 
 BEAM_CHAR = "│"  # thin vertical bar (U+2502), centered in its cell so both neighbouring
                  # characters sit flush against it ; "▏" (U+258F) hugs the left edge only,
@@ -282,6 +294,15 @@ def _md_cell(value) -> str:
     """Escape a value for a Markdown table cell: a literal `|` would start a new column and a
     newline would break the row, so neutralise both (names/categories are arbitrary user text)."""
     return str(value).replace("|", "\\|").replace("\n", " ").replace("\r", " ")
+
+
+def _pct_capped(num: int, den: int) -> int:
+    """Percentage num/den, but never 100 unless num>=den (so 23/24 shows 96, not 100)."""
+    if not den:
+        return 0
+    if num >= den:
+        return 100
+    return min(99, round(100 * num / den))
 
 
 def build_member_md(name: str, challenges: list[dict], solved_ids: set[int],
@@ -497,6 +518,19 @@ class CategoryTree(Tree):
         return text
 
 
+class MemberCard(Static):
+    """A clickable KPI-style card for one team member (Stats tab). Clicking it opens that
+    member's breakdown by category. The member's user id is kept on the widget."""
+
+    def __init__(self, renderable, uid, **kw):
+        super().__init__(renderable, **kw)
+        self.member_uid = uid
+
+    def on_click(self) -> None:
+        if self.member_uid is not None:
+            self.app.open_member_breakdown(self.member_uid)
+
+
 class Flagship(App):
     CSS = """
     Header HeaderIcon { display: none; }  /* drop the "⭘" command-palette icon, top-left */
@@ -546,7 +580,12 @@ class Flagship(App):
     /* subtle cursor so the selected row's category colour (set per-row) stays readable */
     #flags > .datatable--cursor { background: $boost; }
     #flags:focus > .datatable--cursor { background: $boost; }
-    #stats { padding: 0 1; }
+    /* Team members: a centred 2-line title above a centred row of clickable cards */
+    #members_title { width: 1fr; height: auto; text-align: center; padding: 1 1 0 1; }
+    #members { width: 1fr; height: auto; align-horizontal: center; padding: 0 1; }
+    #category_table { width: 1fr; height: auto; padding: 1 1 0 1; }
+    MemberCard { width: auto; height: auto; margin: 0 1; }
+    MemberCard:hover { background: $boost; }
     #notifs { padding: 0 1; }
     #log { padding: 0 1; }
     /* toasts default to bottom-right, right over the flag field ; top-right stays clear */
@@ -650,18 +689,21 @@ class Flagship(App):
                 yield Static("", id="me_sticky")
             with TabPane("Stats", id="tab-stats"):
                 with VerticalScroll():
-                    yield Markdown("*Statistics…*", id="stats", open_links=False)
-                    # "Progress by category" lives in a Static (not the Markdown) so the
-                    # category names and bars can be coloured per category
+                    # KPI cards + "Progress by category" live in a Static (Rich) so cards and
+                    # category bars can be coloured ; team members stay a Markdown (clickable names)
                     yield Static("", id="progress_bars")
+                    # Team members: centred title (2 lines) above a centred row of clickable cards
+                    yield Static("", id="members_title")
+                    yield Horizontal(id="members")
+                    # "Progress by category" table, shown last
+                    yield Static("", id="category_table")
             with TabPane("Flags", id="tab-flags"):
                 yield DataTable(id="flags")
             with TabPane("Notifications", id="tab-notifs"):
                 with VerticalScroll():
                     yield Static("No notifications.", id="notifs")
-            with TabPane("Log", id="tab-log"):
-                with VerticalScroll():
-                    yield Static("No activity yet.", id="log")
+            with TabPane("Log", id="tab-log"), VerticalScroll():
+                yield Static("No activity yet.", id="log")
         yield Static("", id="connstatus")
         yield ProgressBar(id="progress", show_eta=False)
         yield Footer()
@@ -743,11 +785,17 @@ class Flagship(App):
 
     def on_resize(self, event: events.Resize) -> None:
         self._update_me_sticky()  # the visible-rows count changed
+        # re-fit the Stats cards + category bars to the new width (after layout settles)
+        if getattr(self, "_stats_cache", None):
+            self.call_after_refresh(self._render_stats_panel)
 
     def on_tabbed_content_tab_activated(self, event) -> None:
-        # the scoreboard pane has a real size only once shown: re-evaluate the sticky then
-        if self.query_one(TabbedContent).active == "tab-score":
+        # a pane has a real size only once shown: re-fit the width-dependent bits then
+        active = self.query_one(TabbedContent).active
+        if active == "tab-score":
             self.call_after_refresh(self._update_me_sticky)
+        elif active == "tab-stats" and getattr(self, "_stats_cache", None):
+            self.call_after_refresh(self._render_stats_panel)
 
 
     # -- persistent UI state ------------------------------------
@@ -1020,50 +1068,104 @@ class Flagship(App):
             self._cc_map = m
         return m.get(cat) or self._CAT_COLORS[zlib.crc32(cat.encode()) % len(self._CAT_COLORS)]
 
-    def _render_progress_bars(self, cats: dict[str, dict]) -> None:
-        """The single 'Progress by category' section (#progress_bars Static): a bordered
-        Rich table with, per category, the progress bar plus Solved / Points / Downloaded.
-        The name and bar share the category's colour (same as the challenges tree).
-        `cats[cat]` holds 's','n','pw','pt','dl'. A Rich table is needed to colour cells."""
+    def _render_stats_panel(self) -> None:
+        """Render, sized to the current width: the banner + 'Team overview' KPI cards into
+        #progress_bars, and the 'Progress by category' table into #category_table (shown last).
+        Reads self._stats_cache = (header, kpis, cats). Re-run on resize to re-fit cards/bars."""
         try:
             w = self.query_one("#progress_bars", Static)
+            w_cat = self.query_one("#category_table", Static)
         except Exception:  # noqa: BLE001
             return
+        cache = getattr(self, "_stats_cache", None)
+        if not cache:
+            return
+        header, kpis, cats = cache
+
+        # --- banner + overview KPI cards (top block, centred) ---
+        cards = []
+        for title, value, sub, color in kpis:
+            body = Text()
+            body.append(str(value), style=f"bold {color}")
+            if sub:
+                body.append("\n" + str(sub), style="dim")
+            cards.append(Panel(body, title=title, title_align="left",
+                               border_style=color, box=box.ROUNDED, padding=(0, 1)))
+        parts = [header, Text()] if header is not None else []
+        if cards:
+            overview = "Team overview" if self.me.get("team") else "Overview"
+            parts += [Text(overview, style="bold", justify="center"), Text(),
+                      Align.center(Columns(cards, padding=(0, 1), equal=True, expand=False))]
+        w.update(Group(*parts))
+
+        # --- Progress by category table (own widget, rendered last) ---
+        avail = 0
+        try:
+            avail = w_cat.size.width or 0
+        except Exception:  # noqa: BLE001
+            avail = 0
+        if avail <= 0:
+            try:
+                avail = self.size.width or 0
+            except Exception:  # noqa: BLE001
+                avail = 0
+        avail = avail or 80
         order = sorted(cats)
         if not order:
-            w.update("")
+            w_cat.update("")
             return
+        wname = max([len("Category")] + [len(c) for c in order])
+        wpct = len("✓100%")  # 5 ; its own column, right-justified (no wrapping under the bar)
+        wsolved = max([len("Solved")] + [len(f"{cats[c]['s']}/{cats[c]['n']}") for c in order])
+        wpoints = max([len("Points")] + [len(f"{cats[c]['pw']}/{cats[c]['pt']}") for c in order])
+        wdled = max([len("Downloaded")] + [len(f"{cats[c]['dl']}/{cats[c]['n']}") for c in order])
+        # SIMPLE_HEAVY, pad_edge=False : measured overhead for 6 columns = 17 ; +2 margin.
+        bar_w = max(12, avail - wname - wpct - wsolved - wpoints - wdled - 17 - 2)
         tbl = Table(box=box.SIMPLE_HEAVY, pad_edge=False, header_style="bold")
         tbl.add_column("Category")
-        tbl.add_column("Progress")
+        # fixed width + crop so the bar is never shrunk/ellipsised by Rich
+        tbl.add_column("Progress", width=bar_w, no_wrap=True, overflow="crop")
+        tbl.add_column("%", justify="right")
         tbl.add_column("Solved", justify="right")
         tbl.add_column("Points", justify="right")
         tbl.add_column("Downloaded", justify="right")
         for cat in order:
             d = cats[cat]
             color = self._cat_color(cat)
-            filled = round((d["s"] / d["n"]) * 12) if d["n"] else 0
+            complete = bool(d["n"]) and d["s"] >= d["n"]
+            frac = (d["s"] / d["n"]) if d["n"] else 0
+            # never fully filled unless truly complete (so 23/24 keeps a visible gap)
+            filled = bar_w if complete else min(bar_w - 1, round(frac * bar_w))
             bar = Text()
             bar.append("█" * filled, style=color)
-            bar.append("░" * (12 - filled), style="grey37")  # empty part stays neutral
-            # style=color colours the WHOLE row (name, bar, Solved, Points, Downloaded)
-            tbl.add_row(Text(cat, style="bold"), bar,
+            bar.append("░" * (bar_w - filled), style="grey53")  # empty track, now visible
+            # 100% gets a distinct completion mark ; otherwise the capped %, in the row colour
+            pct = (Text("✓100%", style="bold green3") if complete
+                   else Text(f"{_pct_capped(d['s'], d['n'])}%"))
+            # style=color colours the WHOLE row (name, Solved, Points, Downloaded)
+            tbl.add_row(Text(cat, style="bold"), bar, pct,
                         f"{d['s']}/{d['n']}", f"{d['pw']}/{d['pt']}", f"{d['dl']}/{d['n']}",
                         style=color)
-        w.update(Group(Text("Progress by category", style="bold underline"), Text(), tbl))
+        w_cat.update(tbl)
 
     def _render_stats(self) -> None:
         try:
-            w = self.query_one("#stats", Markdown)
+            panel_w = self.query_one("#progress_bars", Static)
+            cat_w = self.query_one("#category_table", Static)
+            title_w = self.query_one("#members_title", Static)
+            members_box = self.query_one("#members", Horizontal)
         except Exception:  # noqa: BLE001
             return
         chs = self.challenges
         if not chs:
-            w.update("*No data yet. Run a sync (`r`).*")
-            try:
-                self.query_one("#progress_bars", Static).update("")
-            except Exception:  # noqa: BLE001
-                pass
+            panel_w.update(Text("No data yet. Run a sync (r).", style="dim"))
+            cat_w.update("")
+            title_w.update("")
+            title_w.display = False
+            self._members_sig = None
+            members_box.remove_children()
+            members_box.display = False
+            self._stats_cache = None
             return
         total = len(chs)
         solved = [c for c in chs if c.get("solved")]
@@ -1072,55 +1174,32 @@ class Flagship(App):
         pts_all = sum(int(c.get("value") or 0) for c in chs)
         s, p = self.me.get("score"), self.me.get("place")
         team = self.me.get("team")
-        md = [f"# Statistics · {self.cfg.ctf_name}", ""]
         my_name = self.me.get("name")
         solved_ids = {int(c["id"]) for c in solved}
         known_fb = {cid: self._fb_cache[cid] for cid in solved_ids if cid in self._fb_cache}
         fb_count = sum(1 for n in known_fb.values() if n == my_name)
         pending = len(solved_ids) - len(known_fb)
-        fb_label = "Team first bloods" if team else "First bloods"
+        fb_label = "Team 1st bloods" if team else "First bloods"
 
-        rows = []
+        # banner (centred): CTF name on top, who you are just below
+        hdr = [Text(f"Statistics · {self.cfg.ctf_name}", style="bold", justify="center")]
         if my_name:
-            rows.append(("Team" if team else "Player", my_name))
-        if s is not None:
-            score_label = "Score (team)" if team else "Score"
-            rows.append((score_label, f"{s}" + (f"  ·  Rank #{p}" if p else "")))
-        rows.append(("Solved", f"{len(solved)} / {total}"))
-        rows.append(("Points earned", f"{pts_won} / {pts_all}"))
-        rows.append(("Downloaded", f"{len(dled)} / {total}"))
-        rows.append((fb_label, f"{fb_count} / {len(solved)}" +
-                    (f"  ·  _checking {pending} more…_" if pending else "")))
-        md += ["| Stat | Value |", "|------|-------|"]
-        md += [f"| {k} | {v} |" for k, v in rows]
-        if self._personal:  # team mode: each member's contribution
-            val = {int(c["id"]): int(c.get("value") or 0) for c in chs if c.get("id") is not None}
-            my_id = self._personal.get("id")
-            ps, pp = self._personal.get("score"), self._personal.get("place")
-            md += ["", "## Team members"]
-            if ps is not None:
-                rank = f"#{pp}" if pp else "—"
-                md.append(f"*Your individual rank: {rank} · your score: {ps}*")
-            rows = [(m.get("name", "?"), m.get("count", 0),
-                     sum(val.get(cid, 0) for cid in m.get("solved_ids", [])), m.get("user_id"))
-                    for m in self._members]
-            # guarantee your own row even if you have not solved anything yet
-            if my_id is not None and my_id not in {r[3] for r in rows}:
-                rows.append((self._personal.get("name", "you"), 0, 0, my_id))
-            rows.sort(key=lambda r: (-r[2], -r[1], r[0].lower()))
-            md += ["*Click a name to see their breakdown by category.*", "",
-                   "| Member | Solved | Points |", "|--------|--------|--------|"]
-            for name, cnt, pts, uid in rows:
-                me_row = my_id is not None and uid == my_id
-                label = f"{name} (you)" if me_row else name
-                # clickable name (href 'member:<id>') intercepted by on_markdown_link_clicked
-                link = f"[{label}](member:{uid})" if uid is not None else label
-                nm = f"**{link}**" if me_row else link
-                c2 = f"**{cnt}**" if me_row else str(cnt)
-                c3 = f"**{pts}**" if me_row else str(pts)
-                md.append(f"| {nm} | {c2} | {c3} |")
-            if not rows:
-                md.append("| *(no solves yet)* |  |  |")
+            hdr.append(Text(f"({'Team' if team else 'Player'}: {my_name})",
+                            style="dim", justify="center"))
+        header = Group(*hdr)
+
+        # KPI cards — every stat kept : (title, value, sub, colour)
+        kpis = [
+            ("Score", s if s is not None else "—", (f"Rank #{p}" if p else "unranked"), "cyan"),
+            ("Solved", f"{len(solved)}/{total}", f"{_pct_capped(len(solved), total)}%", "green3"),
+            ("Points", f"{pts_won}/{pts_all}", f"{_pct_capped(pts_won, pts_all)}%", "yellow3"),
+            ("Downloaded", f"{len(dled)}/{total}", f"{_pct_capped(len(dled), total)}%", "blue"),
+            (fb_label, f"{fb_count}/{len(solved)}",
+             f"{_pct_capped(fb_count, len(solved))}%" + (f"  (+{pending})" if pending else ""),
+             "magenta"),
+        ]
+
+        # per-category aggregation (for the table)
         cats: dict[str, dict] = {}
         for c in chs:
             d = cats.setdefault(c.get("category", "?"), {"n": 0, "s": 0, "dl": 0, "pw": 0, "pt": 0})
@@ -1132,28 +1211,68 @@ class Flagship(App):
                 d["pw"] += v
             if c.get("downloaded"):
                 d["dl"] += 1
-        w.update("\n".join(md))
-        # single per-category section (bar + Solved/Points/Downloaded), coloured and
-        # rendered in its own Static (category colours match the challenges tree)
-        self._render_progress_bars(cats)
 
-    def on_markdown_link_clicked(self, event) -> None:
-        """Click on a name (href 'member:<id>') in the Stats tab → opens their detail box, or on
-        "N solves" (href 'solves:<id>') in the challenge detail panel → opens the solver list.
-        Other links (external links in the detail, http) are ignored here."""
-        href = getattr(event, "href", "") or ""
-        if href.startswith("member:"):
-            try:
-                uid = int(href.split(":", 1)[1])
-            except ValueError:
-                return
-            m = next((x for x in self._members if x.get("user_id") == uid), None)
-            if not m:
-                return
+        self._stats_cache = (header, kpis, cats)
+        self._render_stats_panel()
+
+        # team members: a centred title + a centred row of clickable KPI-style cards (one per
+        # member : pseudo as title, "N solved" as value, points below). Click -> breakdown. Solo = hidden.
+        if self._personal:  # team mode
+            val = {int(c["id"]): int(c.get("value") or 0) for c in chs if c.get("id") is not None}
+            my_id = self._personal.get("id")
+            rows = [(m.get("name", "?"), m.get("count", 0),
+                     sum(val.get(cid, 0) for cid in m.get("solved_ids", [])), m.get("user_id"))
+                    for m in self._members]
+            # guarantee your own row even if you have not solved anything yet
+            if my_id is not None and my_id not in {r[3] for r in rows}:
+                rows.append((self._personal.get("name", "you"), 0, 0, my_id))
+            rows.sort(key=lambda r: (-r[2], -r[1], r[0].lower()))
+            # "Members details" + the hint, both centred, on two lines above the cards
+            title = Text(justify="center")
+            title.append("Members details", style="bold")
+            title.append("\nclick a member for their breakdown", style="dim")
+            title_w.update(title)
+            title_w.display = True
+            # rebuild the cards only when the member data changed (avoids flicker on each poll)
+            sig = tuple((r[3], r[1], r[2]) for r in rows)
+            if sig != getattr(self, "_members_sig", None):
+                self._members_sig = sig
+                cards = []
+                for name, cnt, pts, uid in rows:
+                    me_row = my_id is not None and uid == my_id
+                    label = f"{name} (you)" if me_row else name
+                    color = self._cat_color(name)  # stable per-member colour (same as categories)
+                    body = Text()
+                    body.append(f"{cnt} solved", style=f"bold {color}")
+                    body.append(f"\n{pts} pts", style="dim")
+                    cards.append(MemberCard(
+                        Panel(body, title=label, title_align="left",
+                              border_style=color, box=box.ROUNDED, padding=(0, 1)), uid))
+                members_box.remove_children()
+                if cards:
+                    members_box.mount(*cards)
+            members_box.display = True
+        else:
+            title_w.update("")
+            title_w.display = False
+            self._members_sig = None
+            members_box.remove_children()
+            members_box.display = False
+
+    def open_member_breakdown(self, uid: int) -> None:
+        """Open a team member's breakdown by category (clicked from the Stats member cards)."""
+        m = next((x for x in self._members if x.get("user_id") == uid), None)
+        if m:
             self.push_screen(MemberStatsScreen(
                 m.get("name", "?"), self.challenges, set(m.get("solved_ids", [])),
                 self._fb_cache, self.me.get("name")))
-        elif href.startswith("solves:"):
+
+    def on_markdown_link_clicked(self, event) -> None:
+        """Click on "N solves" (href 'solves:<id>') in the challenge detail panel → opens the
+        solver list. Other links (external links in the detail, http) are ignored here.
+        (Team members are clickable cards now, handled by MemberCard.on_click.)"""
+        href = getattr(event, "href", "") or ""
+        if href.startswith("solves:"):
             if self._solves_loading:  # a list is already opening: ignore a double-click
                 return
             try:
@@ -1988,14 +2107,14 @@ class Flagship(App):
         the highlight vanished under the `ansi-dark`/`ansi-light` themes. Fall back to the plain
         standard-colour name (`ansi_yellow` -> `yellow`), which renders in every theme."""
         c = self.get_css_variables().get("warning", "yellow")
-        return c[5:] if c.startswith("ansi_") else c
+        return c.removeprefix("ansi_")
 
     def _theme_color(self, var: str, fallback: str) -> str:
         """Resolve a theme semantic colour (e.g. `success`, `error`) to a name the DataTable can
         render, with the same `ansi_*` -> plain-name fix as `_sb_accent`. Used to colour the
         "Gap" cell (green when we lead, red when we're behind) per theme."""
         c = self.get_css_variables().get(var, fallback)
-        return c[5:] if c.startswith("ansi_") else c
+        return c.removeprefix("ansi_")
 
     @staticmethod
     def _diff_style(diff_txt: str, is_me: bool, accent: str, lead_c: str, behind_c: str) -> str:

@@ -146,6 +146,7 @@ Chaque challenge reçoit un rapport `downloads.txt` où chaque ligne porte une i
 | ---------- | -------------------------------------------------------------------------- |
 | `ok`       | fichier téléchargé dans `work/`                                            |
 | `skip`     | déjà présent, non écrasé                                                   |
+| `page`     | page web (pas un fichier) : conservée dans `desc.txt`, non téléchargée     |
 | `manual`   | à récupérer à la main (lien dans `desc.txt`) : > 2 Go, Drive privé, MEGA…  |
 | `error`    | le téléchargement a échoué                                                 |
 

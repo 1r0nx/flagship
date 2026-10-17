@@ -5,4 +5,5 @@ __version__ = "0.2.0"
 # tested against (an environment mismatch, harmless here). Silence it before any submodule
 # imports requests, so it doesn't print over the TUI on startup.
 import warnings as _warnings
+
 _warnings.filterwarnings("ignore", message=r".*doesn't match a supported version.*")
