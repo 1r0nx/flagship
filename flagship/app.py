@@ -18,6 +18,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 import zlib
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,6 +72,26 @@ def _fmt_when(raw: str | None) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _human_size(n) -> str:
+    """Human-readable byte size: 512 B, 4.2 KB, 210.0 MB…"""
+    try:
+        n = float(n)
+    except (TypeError, ValueError):
+        return "?"
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{int(n)} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+
+
+def _fmt_dl(written, total) -> str:
+    """'42% (210.0 MB/500.0 MB)' when the size is known, else just the bytes received so far."""
+    if total and total > 0:
+        pct = min(100, int(written * 100 / total))
+        return f"{pct}% ({_human_size(written)}/{_human_size(total)})"
+    return _human_size(written)
 
 
 class _CenterRule:
@@ -565,7 +586,10 @@ class Flagship(App):
     #detailwrap { height: 1fr; }
     #detail { padding: 0 1; }
     #flag { height: 3; border: solid $accent; padding: 0 1; }
-    #progress { dock: bottom; height: 1; display: none; }
+    /* download/sync progress: a label line above the bar, docked bottom, hidden when idle */
+    #progressbox { dock: bottom; height: auto; display: none; background: $panel; }
+    #progress_label { height: 1; padding: 0 1; color: $text-muted; }
+    #progress { height: 1; padding: 0 1; }
     #scoreboard { height: 1fr; }
     /* hover/selection on the scoreboard = just bold, no highlight bar. Background transparent
        removes the cursor/hover bar; with cursor_foreground_priority="renderable" the cells keep
@@ -657,6 +681,8 @@ class Flagship(App):
         self._first_sync = True
         self._online: bool | None = None    # connection state, to log online/offline transitions once
         self._syncing = False               # True during "Sync all" (prevents the poll from cancelling it)
+        self._last_watch = 0.0              # monotonic time of the last full watch pass (throttle)
+        self._force_watch = True            # force a full watch on the next poll (first run + manual refresh)
         self._tree_sig = None               # signature of the displayed data (avoids useless rebuilds)
         self._log_path = cfg.base_dir / ".flagship" / "notifications.log"
         self._state_path = cfg.base_dir / ".flagship" / "state.json"
@@ -705,7 +731,9 @@ class Flagship(App):
             with TabPane("Log", id="tab-log"), VerticalScroll():
                 yield Static("No activity yet.", id="log")
         yield Static("", id="connstatus")
-        yield ProgressBar(id="progress", show_eta=False)
+        with Vertical(id="progressbox"):
+            yield Static("", id="progress_label")
+            yield ProgressBar(id="progress", show_eta=False)
         yield Footer()
 
     def on_mount(self) -> None:
@@ -933,9 +961,20 @@ class Flagship(App):
         if self._syncing:  # a full sync is running: do not interfere
             return
         worker = get_current_worker()
+        # throttle the per-challenge watch loop (the poll's heaviest part: ~0.3 s per downloaded
+        # challenge, so it grows with how many are downloaded). Run it on the first poll, on a manual
+        # refresh, or once every cfg.watch_interval seconds; otherwise do a cheap list-only poll
+        # (no per-challenge detail GETs). The cheap list refresh (solved/value/solves +
+        # scoreboard/me/notifications) still runs on every poll. watch_interval=0 -> watch every poll.
+        now = time.monotonic()
+        do_watch = bool(self.cfg.watch_changes) and (
+            self._force_watch or (now - self._last_watch) >= self.cfg.watch_interval)
+        if do_watch:
+            self._last_watch = now
+            self._force_watch = False
         try:
             challenges, events = store.list_state(
-                self.client, self.cfg.base_dir, self.cfg.watch_changes, self.cfg.auto_unlock_free_hints,
+                self.client, self.cfg.base_dir, do_watch, self.cfg.auto_unlock_free_hints,
                 should_stop=lambda: worker.is_cancelled, workers=self.cfg.download_workers,
                 on_connected=lambda: None if worker.is_cancelled else self.call_from_thread(self._set_conn, True),
                 on_listed=lambda chs: None if worker.is_cancelled else (
@@ -1481,8 +1520,9 @@ class Flagship(App):
         self._syncing = True
         self.call_from_thread(self._show_progress, True)
 
-        def progress(done, total):
-            self.call_from_thread(self._set_progress, done, total)
+        def progress(done, total, name=""):
+            txt = f"{name}   ·   {done}/{total} challenges" if name else f"{done}/{total} challenges"
+            self.call_from_thread(self._set_progress, done, total, txt)
 
         self.call_from_thread(self._emit, "⏳ Full sync…", "information", 3)
         try:
@@ -1500,25 +1540,52 @@ class Flagship(App):
         self.call_from_thread(self._emit, f"✅ Full sync: {n} challenges downloaded.", "information", 6)
 
     def _show_progress(self, on: bool) -> None:
-        pb = self.query_one("#progress", ProgressBar)
-        pb.display = on
+        self.query_one("#progressbox").display = on
         if on:
-            pb.update(total=100, progress=0)
+            self.query_one("#progress", ProgressBar).update(total=100, progress=0)
+            self.query_one("#progress_label", Static).update("")
 
-    def _set_progress(self, done: int, total: int) -> None:
-        self.query_one("#progress", ProgressBar).update(total=total, progress=done)
+    def _set_progress(self, done: int, total: int, text: str | None = None) -> None:
+        # total <= 0 -> indeterminate (pulsing) bar, for a download whose size the server didn't send
+        self.query_one("#progress", ProgressBar).update(
+            total=(total if total and total > 0 else None), progress=done)
+        if text is not None:
+            self.query_one("#progress_label", Static).update(text)
 
     @work(thread=True, exclusive=True, group="download")
     def download_worker(self, summary: dict) -> None:
+        name = summary.get("name", "?")
+        # show the bottom bar for this single download, unless a full/category sync already owns it
+        manage_bar = not self._syncing
+        if manage_bar:
+            self.call_from_thread(self._show_progress, True)
+        last = [0.0]  # last UI update time, to throttle byte updates to ~10/s
+
+        def on_file(fname, i, n):
+            if manage_bar:
+                self.call_from_thread(self._set_progress, 0, 0, f"⬇ {name} · {fname}  (file {i}/{n})")
+
+        def on_bytes(fname, written, total):
+            if not manage_bar:
+                return
+            now = time.monotonic()
+            if (total and written >= total) or (now - last[0]) >= 0.1:  # final tick, or every 100 ms
+                last[0] = now
+                self.call_from_thread(self._set_progress, written, total or 0,
+                                      f"⬇ {name} · {fname}  {_fmt_dl(written, total)}")
+
         try:
             path, events = store.download_one(
-                self.client, self.cfg.base_dir, summary, self.cfg.watch_changes, self.cfg.auto_unlock_free_hints)
+                self.client, self.cfg.base_dir, summary, self.cfg.watch_changes,
+                self.cfg.auto_unlock_free_hints, on_file=on_file, on_bytes=on_bytes)
         except CTFdError as e:
             self.call_from_thread(self._emit, f"Download failed: {e}", "error")
             return
+        finally:
+            if manage_bar:
+                self.call_from_thread(self._show_progress, False)
         downloaded = (Path(path) / "desc.txt").exists()  # actual state on disk (self-healed)
-        self.call_from_thread(self._after_download, int(summary["id"]), path, downloaded,
-                              summary.get("name", "?"), events)
+        self.call_from_thread(self._after_download, int(summary["id"]), path, downloaded, name, events)
 
     def _after_download(self, cid: int, path: str, downloaded: bool, name: str, events: list) -> None:
         for c in self.challenges:
@@ -2183,6 +2250,7 @@ class Flagship(App):
     def action_refresh(self) -> None:
         self.notify("Refreshing…", timeout=2)
         self._fb_backoff = False  # a manual refresh always gets to retry first bloods too
+        self._force_watch = True  # a manual refresh forces a full watch pass (detail re-fetch) now
         self.list_worker()
         self.scoreboard_worker()
         self.me_worker()
@@ -2253,8 +2321,9 @@ class Flagship(App):
         self._syncing = True
         self.call_from_thread(self._show_progress, True)
 
-        def progress(done, total):
-            self.call_from_thread(self._set_progress, done, total)
+        def progress(done, total, name=""):
+            txt = f"{name}   ·   {done}/{total} challenges" if name else f"{done}/{total} challenges"
+            self.call_from_thread(self._set_progress, done, total, txt)
 
         self.call_from_thread(self._emit, f"⏳ Downloading \"{cat}\"…", "information", 3)
         try:

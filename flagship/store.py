@@ -240,8 +240,9 @@ def _looks_like_page(r: requests.Response) -> bool:
     return ctype.startswith("text/html") or ctype == "application/xhtml+xml"
 
 
-def download_external(url: str, dest_dir: Path, max_bytes: int = MAX_BYTES) -> tuple[str, str]:
-    """Download an external link (NEVER with CTFd auth). (status, detail)."""
+def download_external(url: str, dest_dir: Path, max_bytes: int = MAX_BYTES, on_bytes=None) -> tuple[str, str]:
+    """Download an external link (NEVER with CTFd auth). (status, detail).
+    `on_bytes(written, total)` reports progress for direct http/dropbox links (total=0 if unknown)."""
     kind = classify_link(url)
     if kind == "gdrive":
         try:
@@ -295,23 +296,38 @@ def download_external(url: str, dest_dir: Path, max_bytes: int = MAX_BYTES) -> t
     if dest.exists():  # never overwrite an already-present file
         r.close()
         return "skip", f"{dest.name} (already present)"
-    return _stream_to(r, dest, max_bytes)
+    return _stream_to(r, dest, max_bytes, on_bytes=on_bytes, total=size)
 
 
-def _do_downloads(client, d: Path, detail, file_urls, ext_links) -> list[str]:
+def _do_downloads(client, d: Path, detail, file_urls, ext_links, on_file=None, on_bytes=None) -> list[str]:
+    """Download a challenge's files into work/. Optional progress callbacks (used by the single
+    `d` download): `on_file(name, index, n_items)` when each file starts, `on_bytes(name, written,
+    total)` as its bytes arrive. Both are None in the parallel sync paths (no per-file bar there)."""
     work = d / "work"
     work.mkdir(parents=True, exist_ok=True)
     report = []
-    for f in detail.get("files") or []:
+    files = detail.get("files") or []
+    n_items = len(files) + len(ext_links)
+    idx = 0
+    for f in files:
         base = Path(f.split("?")[0]).name
+        idx += 1
+        if on_file:
+            on_file(base, idx, n_items)
         dest = work / base
         if dest.exists():
             report.append(f"[skip] work/{base} (already present)")
             continue
-        status, info = client.download(f, dest)
+        cb = (lambda w, t, _n=base: on_bytes(_n, w, t)) if on_bytes else None
+        status, info = client.download(f, dest, on_bytes=cb)
         report.append(f"[{status}] work/{base} : {info}")
     for u in ext_links:
-        status, info = download_external(u, work)
+        idx += 1
+        name = u.split("?")[0].rstrip("/").split("/")[-1] or u
+        if on_file:
+            on_file(name, idx, n_items)
+        cb = (lambda w, t, _n=name: on_bytes(_n, w, t)) if on_bytes else None
+        status, info = download_external(u, work, on_bytes=cb)
         report.append(f"[{status}] {u} : {info}")
     if report:
         (d / "downloads.txt").write_text(
@@ -341,7 +357,7 @@ def _auto_unlock_free(client, detail: dict) -> dict:
 
 
 def ensure_challenge(client: CTFd, base_dir: Path, summary: dict, watch: bool,
-                     auto_free_hints: bool = False):
+                     auto_free_hints: bool = False, on_file=None, on_bytes=None):
     d = Path(summary["path"]) if summary.get("path") else challenge_dir(
         base_dir, summary.get("category", ""), summary.get("name", ""))
     (d / "work").mkdir(parents=True, exist_ok=True)
@@ -363,7 +379,7 @@ def ensure_challenge(client: CTFd, base_dir: Path, summary: dict, watch: bool,
 
     if not desc.exists():
         desc.write_text(_desc_text(detail, file_urls, ext_links), encoding="utf-8")
-        _do_downloads(client, d, detail, file_urls, ext_links)
+        _do_downloads(client, d, detail, file_urls, ext_links, on_file, on_bytes)
         _save_state(d, {"desc_hash": desc_hash, "hints": hints_now, "version": 1})
         events.append({"kind": "new", "name": name})
         return d, events, detail
@@ -394,7 +410,7 @@ def ensure_challenge(client: CTFd, base_dir: Path, summary: dict, watch: bool,
     return d, events, detail
 
 
-def download_one(client, base_dir, summary, watch=True, auto_free_hints=False):
+def download_one(client, base_dir, summary, watch=True, auto_free_hints=False, on_file=None, on_bytes=None):
     """Download/complete ONE challenge, in a SELF-HEALING way.
 
     - always goes through `ensure_challenge` → recreates `desc.txt` (+ state) if missing, then
@@ -403,7 +419,8 @@ def download_one(client, base_dir, summary, watch=True, auto_free_hints=False):
       (idempotent: files already present are skipped).
     Returns (path, events). Never a `work/`/`downloads.txt` without `desc.txt`.
     """
-    d, events, detail = ensure_challenge(client, base_dir, summary, watch, auto_free_hints)
+    d, events, detail = ensure_challenge(client, base_dir, summary, watch, auto_free_hints,
+                                         on_file=on_file, on_bytes=on_bytes)
     fresh = any(e.get("kind") == "new" for e in events)  # desc.txt was just (re)created -> already downloaded
     if not fresh:
         if detail is None:
@@ -412,7 +429,7 @@ def download_one(client, base_dir, summary, watch=True, auto_free_hints=False):
                 detail = _auto_unlock_free(client, detail)
         file_urls = [(Path(f.split("?")[0]).name, client.file_url(f)) for f in (detail.get("files") or [])]
         ext_links = extract_links(detail.get("description"))
-        _do_downloads(client, d, detail, file_urls, ext_links)
+        _do_downloads(client, d, detail, file_urls, ext_links, on_file, on_bytes)
     return str(d), events
 
 
@@ -510,7 +527,7 @@ def sync(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints: bool
                 all_events.extend(evs)
             done += 1
             if progress:
-                progress(done, total)
+                progress(done, total, futs[fut].get("name", ""))
     for ch in challenges:
         ch["solved"] = int(ch.get("id", -1)) in solved or _has_flag(ch.get("path"))
     save_cache(base_dir, challenges)
@@ -547,7 +564,7 @@ def download_subset(client: CTFd, base_dir: Path, summaries: list[dict], watch: 
                 all_events.extend(fut.result() or [])
             done += 1
             if progress:
-                progress(done, total)
+                progress(done, total, futs[fut].get("name", ""))
     return summaries, all_events
 
 

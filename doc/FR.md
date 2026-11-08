@@ -73,6 +73,7 @@ BASE_DIR=./                  # racine des dossiers générés (relatif au config
 POLL_INTERVAL=60             # synchro auto toutes les N secondes (0 = désactivée)
 WRITE_FLAG_ON_SOLVE=true     # écrire flag.txt quand un flag est validé
 WATCH_CHANGES=true           # suivre les changements desc/indices (false = synchro plus légère)
+WATCH_INTERVAL=300           # délai mini (s) entre deux passes de suivi complètes (0 = à chaque poll)
 AUTO_UNLOCK_FREE_HINTS=false # débloquer automatiquement les indices gratuits
 DOWNLOAD_WORKERS=6           # téléchargements en parallèle pour "Sync all"
 THEME=textual-dark           # thème de départ (`t` pour cycler)

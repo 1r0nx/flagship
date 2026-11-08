@@ -9,6 +9,7 @@ Expected format (`KEY=value` lines; `export` and quotes tolerated):
     POLL_INTERVAL=60             # seconds between two auto syncs (0 = disabled)
     WRITE_FLAG_ON_SOLVE=true     # write flag.txt when a flag is accepted
     WATCH_CHANGES=true           # track desc/hint changes (desc2.txt…)
+    WATCH_INTERVAL=300           # min seconds between two full watch passes (0 = every poll)
     AUTO_UNLOCK_FREE_HINTS=false # automatically unlock free hints
     DOWNLOAD_WORKERS=6           # parallel downloads for "Sync all"
     THEME=textual-dark           # start colour theme
@@ -74,6 +75,7 @@ class Config:
     poll_interval: int
     write_flag_on_solve: bool
     watch_changes: bool  # detect description/hint changes (fetch the detail on every sync)
+    watch_interval: int  # min seconds between two full watch passes (per-challenge detail GETs); 0 = every poll
     auto_unlock_free_hints: bool  # automatically unlock cost-0 hints
     download_workers: int  # parallel downloads for "Sync all"
     theme: str  # start colour theme (e.g. textual-dark, nord, gruvbox, dracula…)
@@ -120,6 +122,7 @@ class Config:
             poll_interval=_as_int(d.get("POLL_INTERVAL"), 60),
             write_flag_on_solve=_as_bool(d.get("WRITE_FLAG_ON_SOLVE"), True),
             watch_changes=_as_bool(d.get("WATCH_CHANGES"), True),
+            watch_interval=max(0, _as_int(d.get("WATCH_INTERVAL"), 300)),
             auto_unlock_free_hints=_as_bool(d.get("AUTO_UNLOCK_FREE_HINTS"), False),
             download_workers=max(1, _as_int(d.get("DOWNLOAD_WORKERS"), 6)),
             theme=(d.get("THEME") or "textual-dark").strip(),

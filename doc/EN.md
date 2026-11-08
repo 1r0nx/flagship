@@ -72,6 +72,7 @@ BASE_DIR=./                  # root of generated folders (relative to config.sh)
 POLL_INTERVAL=60             # auto-sync every N seconds (0 = disabled)
 WRITE_FLAG_ON_SOLVE=true     # write flag.txt when a flag is accepted
 WATCH_CHANGES=true           # track desc/hint changes (false = lighter sync)
+WATCH_INTERVAL=300           # min seconds between two full watch passes (0 = every poll)
 AUTO_UNLOCK_FREE_HINTS=false # auto-unlock free (cost 0) hints
 DOWNLOAD_WORKERS=6           # parallel downloads for "Sync all"
 THEME=textual-dark           # start theme (`t` to cycle)

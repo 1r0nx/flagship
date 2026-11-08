@@ -269,10 +269,11 @@ class CTFd:
         except CTFdError:
             return ""
 
-    def download(self, file_path: str, dest, max_bytes: int = 2 * 1024**3) -> tuple[str, str]:
+    def download(self, file_path: str, dest, max_bytes: int = 2 * 1024**3, on_bytes=None) -> tuple[str, str]:
         """Download a file hosted by the platform (authenticated).
 
         Returns (status, detail): "ok" | "manual" (too large) | "error".
+        `on_bytes(written, total)` is called as bytes arrive (total=0 when the size is unknown).
         """
         u = file_path if file_path.startswith("http") else self.url + file_path
         try:
@@ -284,15 +285,16 @@ class CTFd:
         if size and size > max_bytes:
             r.close()
             return "manual", f"{size/1024**3:.1f} GB > 2 GB"
-        return _stream_to(r, dest, max_bytes)
+        return _stream_to(r, dest, max_bytes, on_bytes=on_bytes, total=size)
 
     def file_url(self, file_path: str) -> str:
         """Full URL (with file token) as provided by the API."""
         return file_path if file_path.startswith("http") else self.url + file_path
 
 
-def _stream_to(r: requests.Response, dest, max_bytes: int) -> tuple[str, str]:
-    """Write the stream to dest while honouring a max size (2 GB safeguard)."""
+def _stream_to(r: requests.Response, dest, max_bytes: int, on_bytes=None, total: int = 0) -> tuple[str, str]:
+    """Write the stream to dest while honouring a max size (2 GB safeguard).
+    Calls `on_bytes(written, total)` as data arrives, if given (total=0 means size unknown)."""
     written = 0
     try:
         with open(dest, "wb") as f:
@@ -306,6 +308,8 @@ def _stream_to(r: requests.Response, dest, max_bytes: int) -> tuple[str, str]:
                         pass
                     return "manual", "> 2 GB (aborted)"
                 f.write(chunk)
+                if on_bytes:
+                    on_bytes(written, total)
     except (OSError, requests.RequestException) as e:
         # remove the partial file so a later retry can download it again
         try:

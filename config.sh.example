@@ -11,6 +11,8 @@ POLL_INTERVAL=60           # auto-sync every N seconds (0 = disabled)
 WRITE_FLAG_ON_SOLVE=true   # write flag.txt when a flag is accepted in the TUI
 WATCH_CHANGES=true         # detect description/hint changes (desc2.txt, desc3.txt...)
                            #   set to false for a lighter sync (fewer requests)
+WATCH_INTERVAL=300         # min seconds between two full watch passes (one detail request per
+                           #   downloaded challenge). Keeps polls light on big CTFs; 0 = every poll
 AUTO_UNLOCK_FREE_HINTS=false # automatically unlock free (cost 0) hints
 DOWNLOAD_WORKERS=6         # parallel downloads for "Sync all"
 THEME=textual-dark         # start theme (textual-dark, textual-light, nord, gruvbox,
