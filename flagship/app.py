@@ -11,6 +11,8 @@ Usage: python -m flagship [path/config.sh]
 
 from __future__ import annotations
 
+import argparse
+import asyncio
 import colorsys
 import json
 import os
@@ -56,6 +58,10 @@ from textual.widgets import (
     Tree,
 )
 from textual.worker import get_current_worker
+
+from . import shutdown, store
+from .config import Config
+from .ctfd import CTFd, CTFdError, OfflineCTFd
 
 
 def _fmt_when(raw: str | None) -> str:
@@ -103,10 +109,6 @@ class _CenterRule:
         w = max(1, options.max_width)
         left = (w - 1) // 2
         yield Text("─" * left + "o" + "─" * (w - 1 - left), style="dim")
-
-from . import store
-from .config import Config
-from .ctfd import CTFd, CTFdError
 
 BEAM_CHAR = "│"  # thin vertical bar (U+2502), centered in its cell so both neighbouring
                  # characters sit flush against it ; "▏" (U+258F) hugs the left edge only,
@@ -326,82 +328,57 @@ def _pct_capped(num: int, den: int) -> int:
     return min(99, round(100 * num / den))
 
 
-def build_member_md(name: str, challenges: list[dict], solved_ids: set[int],
-                    fb_cache: dict[int, str] | None = None,
-                    team_name: str | None = None) -> str:
-    """Markdown for a member's detail: "By category" + "Progress by category",
-    computed from the challenges they solved (ranked by descending points).
+def member_history(challenges: list[dict], solves: list[dict]) -> list[dict]:
+    """A team member's solve history, most recent first: [{name, category, value, date}].
 
-    `fb_cache` (optional): {challenge_id: first-solver-name}. In team mode, CTFd's public
-    solves list attributes a solve to the TEAM, not the member, so a first blood is counted for
-    this member when `fb_cache[cid] == team_name` (the team's own first blood) AND the
-    challenge is in this member's personal `solved_ids` (which DOES come from a per-member
-    source: `/teams/me/solves`'s `user` field), meaning they personally made that winning
-    submission. `team_name` defaults to `name` for the solo-player case."""
-    fb_cache = fb_cache or {}
-    fb_name = team_name if team_name is not None else name
-    cats: dict[str, dict] = {}
-    total_s = total_p = total_fb = 0
-    for c in challenges:
-        cid = int(c.get("id", -1))
-        d = cats.setdefault(c.get("category", "?"), {"n": 0, "s": 0, "pw": 0, "pt": 0})
-        v = int(c.get("value") or 0)
-        d["n"] += 1
-        d["pt"] += v
-        if cid in solved_ids:
-            d["s"] += 1
-            d["pw"] += v
-            total_s += 1
-            total_p += v
-            if fb_cache.get(cid) == fb_name:
-                total_fb += 1
-    fb_note = f"  ·  **First bloods**: {total_fb}" if fb_cache else ""
-    md = [f"# {name}", "", f"**Solved**: {total_s}  ·  **Points**: {total_p}{fb_note}"]
-    done = {k: v for k, v in cats.items() if v["s"] > 0}
-    if not done:
-        md += ["", "*No challenge solved yet.*"]
-        return "\n".join(md)
-    order = sorted(done, key=lambda k: (-done[k]["pw"], -done[k]["s"], k.lower()))
-    md += ["", "## By category (ranked by points)", "",
-           "| Category | Solved | Points |", "|----------|--------|--------|"]
-    for cat in order:
-        d = done[cat]
-        md.append(f"| {_md_cell(cat)} | {d['s']}/{d['n']} | {d['pw']}/{d['pt']} |")
-    md += ["", "## Progress by category", "", "```"]
-    wname = max(len(c) for c in order)
-    for cat in order:
-        d = done[cat]
-        filled = round((d["s"] / d["n"]) * 12) if d["n"] else 0
-        md.append(f"{cat.ljust(wname)}  {'█' * filled}{'░' * (12 - filled)}  {d['s']}/{d['n']}")
-    md.append("```")
-    return "\n".join(md)
+    `solves` is [{challenge_id, date}] from the team stats. A solve whose challenge is not in the
+    current list (hidden, or removed) still appears, named after its id."""
+    by_id = {int(c.get("id", -1)): c for c in challenges}
+    rows = []
+    for s in solves:
+        cid = int(s.get("challenge_id", -1))
+        c = by_id.get(cid, {})
+        rows.append({
+            "name": c.get("name") or f"#{cid}",
+            "category": c.get("category") or "",
+            "value": int(c.get("value") or 0),
+            "date": s.get("date") or "",
+        })
+    rows.sort(key=lambda r: r["date"], reverse=True)  # ISO timestamps sort chronologically
+    return rows
 
 
 class MemberStatsScreen(ModalScreen[None]):
-    """Member detail window (opened by clicking their name in the Stats tab)."""
+    """A team member's solve history (opened by clicking their card in the Stats tab): one row per
+    solve — challenge, category, points, when — most recent first."""
     BINDINGS = [("escape", "dismiss", "Close")]
     CSS = """
     MemberStatsScreen { align: center middle; }
     #mbox { width: 80%; height: 80%; border: thick $accent; background: $surface; padding: 1 2; }
-    #mhead { color: $text-muted; }
+    #mhead { color: $text-muted; height: auto; }
+    #mtable { height: 1fr; }
     """
 
-    def __init__(self, name: str, challenges: list[dict], solved_ids: set[int],
-                fb_cache: dict[int, str] | None = None, team_name: str | None = None):
+    def __init__(self, name: str, challenges: list[dict], solves: list[dict]):
         super().__init__()
         self._name = name
-        self._challenges = challenges
-        self._solved = solved_ids
-        self._fb_cache = fb_cache
-        self._team_name = team_name
+        self._rows = member_history(challenges, solves)
 
     def compose(self) -> ComposeResult:
+        total = sum(r["value"] for r in self._rows)
+        head = f"[b]{escape(self._name)}[/b] · {len(self._rows)} solve(s) · {total} pts   (Esc to close)"
         with Vertical(id="mbox"):
-            yield Static("Esc to close", id="mhead")
-            with VerticalScroll():
-                yield Markdown(build_member_md(self._name, self._challenges, self._solved,
-                                               self._fb_cache, self._team_name),
-                               open_links=False)
+            yield Static(head, id="mhead")
+            table = DataTable(id="mtable", cursor_type="row")
+            yield table
+
+    def on_mount(self) -> None:
+        table = self.query_one("#mtable", DataTable)
+        table.add_columns("Challenge", "Category", "Points", "When")
+        for r in self._rows:
+            table.add_row(r["name"], r["category"], str(r["value"]), _fmt_when(r["date"]))
+        if not self._rows:
+            table.add_row("(no solve yet)", "", "", "")
 
     def action_dismiss(self) -> None:
         self.dismiss(None)
@@ -650,10 +627,11 @@ class Flagship(App):
         Binding("escape", "unfocus", "Leave field", show=False),
     ]
 
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: Config, offline: bool = False):
         super().__init__()
         self.cfg = cfg
-        self.client = CTFd(cfg.url, cfg.token)
+        self.offline = offline  # --offline : only show what is cached on disk, never call the API
+        self.client = OfflineCTFd(cfg.url) if offline else CTFd(cfg.url, cfg.token)
         self.challenges: list[dict] = []
         self.selected: dict | None = None
         self.filter_mode = "all"
@@ -785,6 +763,9 @@ class Flagship(App):
         cached_notifs = store.load_json(self.cfg.base_dir, "notifications_cache.json")
         if cached_notifs:
             self._apply_notifs(cached_notifs, initial=True)
+        if self.offline:  # no network workers, no polling: the cached data above is all there is
+            self._emit("📴 --offline: local data only, no API call", "information", 6)
+            return
         self.list_worker()
         self.scoreboard_worker()
         self.me_worker()
@@ -804,6 +785,7 @@ class Flagship(App):
         poll in flight (one network GET per downloaded challenge) would hold the terminal until the
         whole batch finished. Cancel the workers first: the poll loop checks the cancel flag and
         breaks after the current request, so the join waits for at most one request, not all."""
+        shutdown.request()  # background jobs stop at their next request / chunk
         self._save_ui_state()
         try:
             self.workers.cancel_all()
@@ -975,7 +957,7 @@ class Flagship(App):
         try:
             challenges, events = store.list_state(
                 self.client, self.cfg.base_dir, do_watch, self.cfg.auto_unlock_free_hints,
-                should_stop=lambda: worker.is_cancelled, workers=self.cfg.download_workers,
+                should_stop=lambda: worker.is_cancelled, workers=self.cfg.download_workers, auto_notes=self.cfg.auto_notes,
                 on_connected=lambda: None if worker.is_cancelled else self.call_from_thread(self._set_conn, True),
                 on_listed=lambda chs: None if worker.is_cancelled else (
                     self.call_from_thread(self._set_conn, True),
@@ -1039,8 +1021,9 @@ class Flagship(App):
             w.update("● Online")
         else:
             at = store.last_sync_at(self.cfg.base_dir)
-            w.update(f"⚠ Offline · sync {at.strftime('%d/%m %H:%M')}" if at
-                     else "⚠ Offline · jamais synchronisé")
+            tag = "⚠ Offline (--offline)" if self.offline else "⚠ Offline"
+            w.update(f"{tag} · sync {at.strftime('%d/%m %H:%M')}" if at
+                     else f"{tag} · never synced")
         w.set_class(online, "-online")
         w.set_class(not online, "-offline")
         changed = self._online is not None and self._online != online
@@ -1299,12 +1282,10 @@ class Flagship(App):
             members_box.display = False
 
     def open_member_breakdown(self, uid: int) -> None:
-        """Open a team member's breakdown by category (clicked from the Stats member cards)."""
+        """Open a team member's solve history (clicked from the Stats member cards)."""
         m = next((x for x in self._members if x.get("user_id") == uid), None)
         if m:
-            self.push_screen(MemberStatsScreen(
-                m.get("name", "?"), self.challenges, set(m.get("solved_ids", [])),
-                self._fb_cache, self.me.get("name")))
+            self.push_screen(MemberStatsScreen(m.get("name", "?"), self.challenges, m.get("solves", [])))
 
     def on_markdown_link_clicked(self, event) -> None:
         """Click on "N solves" (href 'solves:<id>') in the challenge detail panel → opens the
@@ -1408,6 +1389,21 @@ class Flagship(App):
         self.notify(f"Loading {row.get('name','?')}'s solves…", timeout=2)
         self.account_solves_worker(int(aid), team, row.get("name", "?"))
 
+    def _remember_fingerprint(self, kind: str, key, value) -> None:
+        """Record what a cached entry was built from (an account's score, a challenge's solve count),
+        so the poll only re-fetches it once that value changes (see refresh_cached_solves_worker)."""
+        if value is None:
+            return
+        meta = store.load_json(self.cfg.base_dir, "cache_meta.json", {}) or {}
+        meta.setdefault(kind, {})[str(key)] = value
+        store.save_json(self.cfg.base_dir, "cache_meta.json", meta)
+
+    def _score_of(self, account_id) -> int | None:
+        return next((r.get("score") for r in self._last_scoreboard if r.get("account_id") == account_id), None)
+
+    def _solve_count_of(self, cid) -> int | None:
+        return next((c.get("solves") for c in self.challenges if int(c.get("id", -1)) == int(cid)), None)
+
     @work(thread=True, exclusive=True, group="acctsolves")
     def account_solves_worker(self, account_id: int, team: bool, name: str) -> None:
         # cache every consulted history (per account) so it stays available offline / after the CTF
@@ -1418,6 +1414,7 @@ class Flagship(App):
             if solves is not None:
                 cache[key] = solves
                 store.save_json(self.cfg.base_dir, "solves_cache.json", cache)
+                self._remember_fingerprint("accounts", key, self._score_of(account_id))
             else:
                 solves = cache.get(key, [])  # unreachable: fall back to the last known
             self.call_from_thread(self.push_screen, AccountSolvesScreen(name, solves, team))
@@ -1426,36 +1423,51 @@ class Flagship(App):
 
     @work(thread=True, exclusive=True, group="solvescache")
     def refresh_cached_solves_worker(self) -> None:
-        """Each poll, re-fetch and re-cache ONLY the solve histories / solver lists already viewed
-        (bounded by what you opened), keeping them fresh without fetching every account on the
-        scoreboard (which would hammer the API and trip rate limits)."""
+        """Each poll, re-fetch the cached solve histories / solver lists ONLY when their fingerprint
+        changed: an account's score on the scoreboard, or a challenge's solve count. Re-fetching every
+        cached entry on every poll would cost one request per cached account, every minute (with
+        "Cache solves" that is the whole scoreboard). An entry with no recorded fingerprint is fetched once."""
         team = bool((self.me or {}).get("team"))
-        sc = store.load_json(self.cfg.base_dir, "solves_cache.json", {}) or {}
+        base = self.cfg.base_dir
+        meta = store.load_json(base, "cache_meta.json", {}) or {}
+        scores = {str(r["account_id"]): r.get("score") for r in self._last_scoreboard
+                  if r.get("account_id") is not None}
+        solves = {str(c["id"]): c.get("solves") for c in self.challenges if c.get("id") is not None}
+
+        sc = store.load_json(base, "solves_cache.json", {}) or {}
+        acc_meta = meta.setdefault("accounts", {})
+        for key in list(sc.keys()):
+            current = scores.get(key)
+            if current is not None and acc_meta.get(key) == current:
+                continue  # unchanged score: nothing new to fetch for this account
+            try:
+                r = self.client.account_solves(int(key), team)
+            except (ValueError, CTFdError):
+                r = None
+            if r is not None:
+                sc[key] = r
+                if current is not None:
+                    acc_meta[key] = current
         if sc:
-            changed = False
-            for key in list(sc.keys()):
-                try:
-                    r = self.client.account_solves(int(key), team)
-                except (ValueError, CTFdError):
-                    r = None
-                if r is not None:
-                    sc[key] = r
-                    changed = True
-            if changed:
-                store.save_json(self.cfg.base_dir, "solves_cache.json", sc)
-        vc = store.load_json(self.cfg.base_dir, "solvers_cache.json", {}) or {}
+            store.save_json(base, "solves_cache.json", sc)
+
+        vc = store.load_json(base, "solvers_cache.json", {}) or {}
+        ch_meta = meta.setdefault("challenges", {})
+        for key in list(vc.keys()):
+            current = solves.get(key)
+            if current is not None and ch_meta.get(key) == current:
+                continue  # same number of solves as when it was cached
+            try:
+                r = self.client.challenge_solvers(int(key))
+            except (ValueError, CTFdError):
+                r = None
+            if r is not None:
+                vc[key] = r
+                if current is not None:
+                    ch_meta[key] = current
         if vc:
-            changed = False
-            for key in list(vc.keys()):
-                try:
-                    r = self.client.challenge_solvers(int(key))
-                except (ValueError, CTFdError):
-                    r = None
-                if r is not None:
-                    vc[key] = r
-                    changed = True
-            if changed:
-                store.save_json(self.cfg.base_dir, "solvers_cache.json", vc)
+            store.save_json(base, "solvers_cache.json", vc)
+        store.save_json(base, "cache_meta.json", meta)
 
     @work(thread=True, exclusive=True, group="preload")
     def preload_all_solves_worker(self) -> None:
@@ -1472,16 +1484,22 @@ class Flagship(App):
         cache = store.load_json(self.cfg.base_dir, "solves_cache.json", {}) or {}
         self.call_from_thread(self._emit, f"⏳ Caching solve history of {len(accounts)} accounts…", "information", 4)
         ok = fail = 0
+        fingerprints: dict[str, int | None] = {}
         def task(aid):
             return aid, self.client.account_solves(aid, team)
         with ThreadPoolExecutor(max_workers=self.cfg.download_workers) as ex:
             for fut in as_completed([ex.submit(task, a) for a in accounts]):
                 aid, res = fut.result()
                 if res is not None:
-                    cache[str(aid)] = res; ok += 1
+                    cache[str(aid)] = res
+                    fingerprints[str(aid)] = self._score_of(aid)
+                    ok += 1
                 else:
                     fail += 1
         store.save_json(self.cfg.base_dir, "solves_cache.json", cache)
+        meta = store.load_json(self.cfg.base_dir, "cache_meta.json", {}) or {}  # one write for the whole batch
+        meta.setdefault("accounts", {}).update({k: v for k, v in fingerprints.items() if v is not None})
+        store.save_json(self.cfg.base_dir, "cache_meta.json", meta)
         msg = f"✅ Cached {ok} account(s)' solve history" + (f" · {fail} failed (rate limit? press A again)" if fail else "")
         self.call_from_thread(self._emit, msg, "warning" if fail else "information", 7)
 
@@ -1495,6 +1513,7 @@ class Flagship(App):
             if solvers is not None:
                 cache[key] = solvers
                 store.save_json(self.cfg.base_dir, "solvers_cache.json", cache)
+                self._remember_fingerprint("challenges", key, self._solve_count_of(cid))
             else:
                 solvers = cache.get(key, [])  # unreachable: fall back to the last known
             team_mode = bool(self.me.get("team"))
@@ -1528,7 +1547,7 @@ class Flagship(App):
         try:
             challenges, events = store.sync(
                 self.client, self.cfg.base_dir, self.cfg.watch_changes,
-                self.cfg.auto_unlock_free_hints, self.cfg.download_workers, progress)
+                self.cfg.auto_unlock_free_hints, self.cfg.download_workers, progress, auto_notes=self.cfg.auto_notes)
         except CTFdError as e:
             self.call_from_thread(self._emit, f"Full sync failed: {e}", "error", 6)
             return
@@ -1577,14 +1596,14 @@ class Flagship(App):
         try:
             path, events = store.download_one(
                 self.client, self.cfg.base_dir, summary, self.cfg.watch_changes,
-                self.cfg.auto_unlock_free_hints, on_file=on_file, on_bytes=on_bytes)
+                self.cfg.auto_unlock_free_hints, on_file=on_file, on_bytes=on_bytes, auto_notes=self.cfg.auto_notes)
         except CTFdError as e:
             self.call_from_thread(self._emit, f"Download failed: {e}", "error")
             return
         finally:
             if manage_bar:
                 self.call_from_thread(self._show_progress, False)
-        downloaded = (Path(path) / "desc.txt").exists()  # actual state on disk (self-healed)
+        downloaded = store.desc_file(Path(path)).exists()  # actual state on disk (self-healed)
         self.call_from_thread(self._after_download, int(summary["id"]), path, downloaded, name, events)
 
     def _after_download(self, cid: int, path: str, downloaded: bool, name: str, events: list) -> None:
@@ -1737,7 +1756,7 @@ class Flagship(App):
         cached yet, so the Stats tab can show how many of them were our own first blood. Cheap on
         a normal poll (nothing to fetch once the backlog is known), persisted so it is only ever
         paid once per challenge."""
-        if self._fb_backoff:  # a previous batch failed entirely (CTF over?) : wait for `r`
+        if self._fb_backoff or self.offline:  # failed batch (CTF over?) : wait for `r` ; offline: no API
             return
         ids = [int(c["id"]) for c in self.challenges if c.get("solved")]
         todo = [cid for cid in ids if cid not in self._fb_cache]
@@ -1943,7 +1962,8 @@ class Flagship(App):
                     star = "[yellow]★[/yellow] " if int(c.get("id", -1)) in self.bookmarked else ""
                     slv = c.get("solves")
                     stail = f"   [dim]{c.get('value','')}pt · {slv} solves[/dim]" if slv is not None else f"   [dim]{c.get('value','')}pt[/dim]"
-                    node.add_leaf(f"{dlm} {mark}  {star}{c.get('name','?')}{stail}", data=c)
+                    # the name is arbitrary text: escape it so "[/]" or "[red]" show literally
+                    node.add_leaf(f"{dlm} {mark}  {star}{escape(str(c.get('name', '?')))}{stail}", data=c)
         finally:
             self._building = False
         # re-pin the cursor on the same challenge (or the selected one as a fallback), deferred
@@ -1978,6 +1998,11 @@ class Flagship(App):
 
     @work(thread=True, exclusive=True, group="detail")
     def detail_worker(self, cid: int) -> None:
+        if self.offline:  # no API: show the challenge as saved on disk (its <nom-du-challenge>.txt)
+            if self.selected and int(self.selected["id"]) == cid:
+                self.call_from_thread(self._render_detail,
+                                      {**self.selected, **self._offline_detail(self.selected)})
+            return
         detail = self._detail_cache.get(cid)
         if detail is None:
             try:
@@ -1987,7 +2012,10 @@ class Flagship(App):
                 return
             self._detail_cache[cid] = detail
         if cid not in self._fb_cache:
-            fb = self.client.first_blood(cid)
+            try:
+                fb = self.client.first_blood(cid)
+            except CTFdError:  # unavailable (CTF over, rate limit): just no first-blood info now
+                fb = None
             if fb is not None:  # "no solver yet" is never cached: it can change later, unlike a
                 self._fb_cache[cid] = fb  # real first blood, which is permanent once set
         # the detail's solve count / dynamic value is fresher than the last list poll: push it
@@ -1995,6 +2023,16 @@ class Flagship(App):
         self.call_from_thread(self._merge_detail_into_list, cid, detail)
         if self.selected and int(self.selected["id"]) == cid:
             self.call_from_thread(self._render_detail, {**self.selected, **detail})
+
+    def _offline_detail(self, c: dict) -> dict:
+        """`--offline`: the description of a challenge comes from its saved <nom-du-challenge>.txt (the detail
+        fetched from the API is only kept in memory, so this file is the offline copy)."""
+        desc = store.desc_file(Path(c["path"])) if c.get("path") else None
+        try:
+            text = desc.read_text(encoding="utf-8") if desc else ""
+        except OSError:
+            text = ""
+        return {"description": text} if text else {}
 
     def _rule(self, title: str) -> str:
         """Centered section divider (`────TITLE────`), sized to the detail pane's current
@@ -2247,7 +2285,15 @@ class Flagship(App):
         self._rebuild_tree()
         self._save_ui_state()
 
+    def _offline_blocked(self, what: str) -> bool:
+        """`--offline`: tell the user this action needs the API, and return True to stop it."""
+        if self.offline:
+            self.notify(f"{what}: unavailable in --offline mode", severity="warning")
+        return self.offline
+
     def action_refresh(self) -> None:
+        if self._offline_blocked("Refresh"):
+            return
         self.notify("Refreshing…", timeout=2)
         self._fb_backoff = False  # a manual refresh always gets to retry first bloods too
         self._force_watch = True  # a manual refresh forces a full watch pass (detail re-fetch) now
@@ -2269,11 +2315,15 @@ class Flagship(App):
         if not self.selected:
             self.notify("Select a challenge first.", severity="warning")
             return
-        # single self-healing path: (re)creates desc.txt if needed + completes the files
+        if self._offline_blocked("Download"):
+            return
+        # single self-healing path: (re)creates <nom-du-challenge>.txt if needed + completes the files
         self.notify(f"Downloading / updating {self.selected.get('name','?')}…", timeout=2)
         self.download_worker(dict(self.selected))
 
     def action_sync_all(self) -> None:
+        if self._offline_blocked("Sync"):
+            return
         n = len(self.challenges)
         q = (f"Sync all: download all {n} challenges (in parallel)?\n"
              f"This may take a while and use a lot of disk space.")
@@ -2303,6 +2353,8 @@ class Flagship(App):
         if not cat:
             self.notify("Move to a category or a challenge.", severity="warning")
             return
+        if self._offline_blocked("Category download"):
+            return
         subset = [c for c in self.challenges if c.get("category") == cat]
         q = (f"Download the {len(subset)} challenges of \"{cat}\" (in parallel)?\n"
              f"Files already present are skipped.")
@@ -2329,7 +2381,7 @@ class Flagship(App):
         try:
             _, events = store.download_subset(
                 self.client, self.cfg.base_dir, subset, self.cfg.watch_changes,
-                self.cfg.auto_unlock_free_hints, self.cfg.download_workers, progress)
+                self.cfg.auto_unlock_free_hints, self.cfg.download_workers, progress, auto_notes=self.cfg.auto_notes)
         except CTFdError as e:
             self.call_from_thread(self._emit, f"Category download failed: {e}", "error", 6)
             return
@@ -2363,6 +2415,8 @@ class Flagship(App):
         self._emit(f"🚩 Flags exported: {self._rel_path(p)}", "information", 5)
 
     def action_cache_all_solves(self) -> None:
+        if self._offline_blocked("Solve-history caching"):
+            return
         n = len([r for r in self._last_scoreboard if r.get("account_id") is not None])
         if not n:
             self.notify("Scoreboard not loaded yet (sync with r).", severity="warning")
@@ -2449,12 +2503,9 @@ class Flagship(App):
         d = Path(self.selected.get("path") or store.challenge_dir(
             self.cfg.base_dir, self.selected.get("category", ""), self.selected.get("name", "")))
         d.mkdir(parents=True, exist_ok=True)
-        notes = d / "notes.md"
-        if not notes.exists():
-            notes.write_text(
-                f"# {self.selected.get('name','?')}\n"
-                f"**Category:** {self.selected.get('category','?')} | "
-                f"**Points:** {self.selected.get('value','?')}\n\n## Notes\n\n", encoding="utf-8")
+        # Notes file named after the challenge folder (same sanitisation: spaces -> '-',
+        # shell-special characters removed), e.g. "Motor City Search" -> Motor-City-Search.md
+        notes = store.ensure_notes(d, self.selected)
         # EDITOR from config.sh wins (the explicit choice for Flagship), then $EDITOR/$VISUAL, then nano.
         # A full command line is allowed (e.g. "subl -w", "code -w") and split into args.
         editor = self.cfg.editor or os.environ.get("EDITOR") or os.environ.get("VISUAL") or "nano"
@@ -2481,6 +2532,8 @@ class Flagship(App):
             return
         if not self.selected:
             self.notify("Select a challenge first.", severity="warning")
+            return
+        if self._offline_blocked("Flag submission"):
             return
         cid = int(self.selected["id"])
         label = self._chal_label(cid)
@@ -2614,6 +2667,8 @@ class Flagship(App):
         if not self.selected:
             self.notify("Select a challenge first.", severity="warning")
             return
+        if self._offline_blocked("Hint unlock"):
+            return
         detail = self._detail_cache.get(int(self.selected["id"]), self.selected)
         locked = [h for h in (detail.get("hints") or []) if not h.get("content")]
         if not locked:
@@ -2656,13 +2711,36 @@ class Flagship(App):
 
 
 def main(argv: list[str] | None = None) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
-    cfg_path = argv[0] if argv else "config.sh"
+    parser = argparse.ArgumentParser(prog="flagship", description="Terminal UI for CTFd")
+    parser.add_argument("config", nargs="?", default="config.sh", help="path to config.sh (default: config.sh)")
+    parser.add_argument("--offline", action="store_true",
+                        help="never calls the API: shows only the cached data")
+    args = parser.parse_args(argv if argv is not None else sys.argv[1:])
     try:
-        cfg = Config.load(cfg_path)
+        cfg = Config.load(args.config)
     except Exception as e:  # noqa: BLE001
         print(f"[flagship] config: {e}", file=sys.stderr)
-        print("Usage: python -m flagship [path/config.sh]", file=sys.stderr)
+        print("Usage: python -m flagship [--offline] [path/config.sh]", file=sys.stderr)
         return 2
-    Flagship(cfg).run()
+    # Own event loop: Textual's default run would wait for every thread worker still inside a request
+    # when the loop closes. We stop them cooperatively instead (see shutdown.py) and return at once.
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        Flagship(cfg, offline=args.offline).run(loop=loop)
+    finally:
+        shutdown.request()
+        loop.close()  # does not wait for executor threads (unlike asyncio.run)
     return 0
+
+
+def cli() -> None:
+    """Console entry point: run the TUI, then leave the process at once.
+
+    A request still in flight (a slow platform, a large download) lives in a non-daemon thread, and
+    the interpreter would wait for it before exiting. Everything that matters is already on disk (atomic
+    writes, `.part` downloads), so exit immediately instead of holding the terminal."""
+    code = main()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)

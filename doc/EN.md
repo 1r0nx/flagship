@@ -7,7 +7,7 @@ per-challenge notes. Flagship does all of it for you.
 
 ![Flagship screenshot](img/screenshot.png)
 
-> The interface and the generated files (`desc.txt`, `notes.md`…) are in English.
+> The interface and the generated files (`<nom-du-challenge>.txt`, `<nom-du-challenge>.md`…) are in English.
 
 ## Screens
 
@@ -32,17 +32,18 @@ per-challenge notes. Flagship does all of it for you.
 - Lists challenges
 - Downloads challenges: one, a whole category, or all of them
 - Tracks what's solved; writes `flag.txt` when a flag is accepted
-- Detects description/hint changes (`desc2.txt`, `desc3.txt`…)
+- Detects description/hint changes (`<nom-du-challenge>-v2.txt`, `<nom-du-challenge>-v3.txt`…)
 - Submits flags
 - Remembers rejected flags so they're never resent
 - Limited-attempts challenge: a confirmation window before submitting
 - Unlocks hints (confirmation for paid ones)
 - Search, filter (all / unsolved / solved / bookmarked) and sort
 - Bookmarks to pin a challenge
-- Per-challenge notes (`notes.md`) in the editor of your choice
+- Per-challenge notes (`<nom-du-challenge>.md`) in the editor of your choice
 - Full scoreboard; double-click a row (or Enter) shows the solve history of a user or team
 - "Gap" column: each row's point gap vs you (green = you lead, red = they lead you)
-- Stats: score, rank, solved, points, first bloods (per-member in team mode)
+- Stats: score, rank, solved, points, first bloods (per-member in team mode; click a member's card
+  for their solve history: challenge, category, points and date, most recent first)
 - Everything cached locally: browsable offline and after the CTF
 - Resizable panes, colour themes, Markdown export
 - Six tabs: Challenges, Scoreboard, Stats, Flags, Notifications (platform
@@ -74,6 +75,7 @@ WRITE_FLAG_ON_SOLVE=true     # write flag.txt when a flag is accepted
 WATCH_CHANGES=true           # track desc/hint changes (false = lighter sync)
 WATCH_INTERVAL=300           # min seconds between two full watch passes (0 = every poll)
 AUTO_UNLOCK_FREE_HINTS=false # auto-unlock free (cost 0) hints
+AUTO_NOTES=false             # create <nom-du-challenge>.md notes automatically (never overwritten)
 DOWNLOAD_WORKERS=6           # parallel downloads for "Sync all"
 THEME=textual-dark           # start theme (`t` to cycle)
 EDITOR=nano                  # editor for notes (e.g. vim, subl, code)
@@ -84,7 +86,8 @@ EDITOR=nano                  # editor for notes (e.g. vim, subl, code)
 ```bash
 ./flagship.sh                 # uses ./config.sh
 ./flagship.sh path/config.sh
-# or: python3 -m flagship [config.sh]
+./flagship.sh --offline       # offline: local data only (see below)
+# or: python3 -m flagship [--offline] [config.sh]
 ```
 
 One clone handles many CTFs: each CTF gets its own `config.sh` (with its own `BASE_DIR`),
@@ -94,6 +97,20 @@ passed as an argument. An alias saves retyping the path:
 alias flagship='~/ctfs/flagship/flagship.sh'
 flagship ~/ctfs/HeroCTF/config.sh
 ```
+
+### Offline mode (`--offline`)
+
+`--offline` **never** calls the CTFd API: Flagship only shows what was cached during the last
+syncs (`BASE_DIR/.flagship/`) and what is already on disk.
+
+- **Shown**: the challenge list, scoreboard, stats, flags, notifications, first bloods, solve
+  histories already opened, and each challenge's description read from its `<nom-du-challenge>.txt`.
+- **Disabled** (a notification says so): refresh (`r`), download (`d`, category, sync all), flag
+  submission, hint unlocking, caching solve histories.
+- **No automatic update**: no polling, and the cache is not rewritten.
+- The status bar shows `⚠ Offline (--offline) · sync DD/MM HH:MM`: the date is the last successful sync.
+
+A challenge that was never downloaded has no `<nom-du-challenge>.txt`, so its description is not available offline.
 
 ## Keyboard shortcuts
 
@@ -112,7 +129,7 @@ flagship ~/ctfs/HeroCTF/config.sh
 | `s` | focus the flag field |
 | `u` | unlock a hint |
 | `c` / `w` | copy connection / open folder |
-| `e` | edit notes (`notes.md`) |
+| `e` | edit notes (`<nom-du-challenge>.md`) |
 | `p` / `P` | export progress / the Flags tab |
 | `A` | cache the whole scoreboard's solve history |
 | `Esc` | leave the active field |
@@ -120,7 +137,6 @@ flagship ~/ctfs/HeroCTF/config.sh
 | `q` | quit |
 
 ## Themes
-
 
 - **Dark (15):** `ansi-dark`, `atom-one-dark`, `catppuccin-frappe`, `catppuccin-macchiato`,
   `catppuccin-mocha`, `dracula`, `flexoki`, `gruvbox`, `monokai`, `nord`, `rose-pine`,
@@ -134,14 +150,14 @@ flagship ~/ctfs/HeroCTF/config.sh
 |------|------|
 | `config.py` | Reads `config.sh` (no shell involved) |
 | `ctfd.py` | CTFd API client |
-| `store.py` | Folders, `desc.txt`, `flag.txt`, downloads, cache |
+| `store.py` | Folders, `<nom-du-challenge>.txt`, `flag.txt`, downloads, cache |
 | `app.py` | The Textual TUI |
 | `__main__.py` | Entry point |
 
 ## Downloads
 
 Files go into `work/`. A file larger than **2 GB is not downloaded** automatically (to
-avoid filling the disk): it's marked `manual` and its link stays in `desc.txt` for manual
+avoid filling the disk): it's marked `manual` and its link stays in `<nom-du-challenge>.txt` for manual
 retrieval.
 
 Each challenge gets a `downloads.txt` report where every line carries a status:
@@ -150,8 +166,8 @@ Each challenge gets a `downloads.txt` report where every line carries a status:
 | -------- | ------------------------------------------------------------------- |
 | `ok`     | file downloaded into `work/`                                        |
 | `skip`   | already present, not overwritten                                    |
-| `page`   | a web page (not a file): kept in `desc.txt`, not downloaded          |
-| `manual` | fetch it by hand (link in `desc.txt`): > 2 GB, private Drive, MEGA… |
+| `page`   | a web page (not a file): kept in `<nom-du-challenge>.txt`, not downloaded          |
+| `manual` | fetch it by hand (link in `<nom-du-challenge>.txt`): > 2 GB, private Drive, MEGA… |
 | `error`  | the download failed                                                 |
 
 ## File tree
@@ -167,24 +183,44 @@ MyCTF/                               # your CTF root (BASE_DIR)
 └── CHALLENGES/
     ├── Crypto/
     │   ├── crypto1/
-    │   │   ├── desc.txt             # challenge statement
+    │   │   ├── <nom-du-challenge>.txt             # challenge statement
     │   │   ├── work/                # downloaded files
-    │   │   ├── notes.md             # your notes (press e)
+    │   │   ├── <nom-du-challenge>.md             # your notes (press e)
     │   │   └── flag.txt             # written when the flag is accepted
     │   └── crypto2/
-    │       ├── desc.txt
+    │       ├── <nom-du-challenge>.txt
     │       └── work/
     └── Forensics/
         ├── forensics1/
-        │   ├── desc.txt
+        │   ├── <nom-du-challenge>.txt
         │   ├── work/
         │   └── flag.txt
         └── forensics2/
-            ├── desc.txt
+            ├── <nom-du-challenge>.txt
             └── work/
 ```
 
-`desc.txt` = statement · `work/` = downloaded files · `notes.md` = your notes · `flag.txt` = appears once the flag is accepted.
+`<nom-du-challenge>.txt` = statement · `work/` = downloaded files · `<nom-du-challenge>.md` = your notes · `flag.txt` = appears once the flag is accepted.
+
+## Tests
+
+```bash
+pip install -e ".[test]"
+python -m pytest                    # unit + TUI tests, against an in-process fake CTFd (no network)
+```
+
+Live tests run against a **local, fictional** CTFd lab (never a real CTF). Clone the official
+CTFd repository, install its requirements, then seed a lab and point the tests at it:
+
+```bash
+git clone --depth 1 https://github.com/CTFd/CTFd.git /path/to/CTFd
+python tests/lab/seed_ctfd.py /path/to/CTFd /path/to/lab/ctfd.db 8101 users /path/to/lab/token
+FLAGSHIP_LIVE_URL=http://127.0.0.1:8101 FLAGSHIP_LIVE_MODE=solo \
+  FLAGSHIP_LIVE_TOKEN="$(cat /path/to/lab/token_player)" FLAGSHIP_LIVE_ADMIN_TOKEN="$(cat /path/to/lab/token)" \
+  python -m pytest tests/test_live_ctfd.py tests/test_live_tui.py
+```
+
+The seed script writes the tokens to files (never printed). Use `users` or `teams` as the mode.
 
 ## Notes
 

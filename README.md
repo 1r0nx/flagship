@@ -12,6 +12,7 @@ cd /workspace/flagship
 pip install -e .                     # deps + commande `flagship` (ou: pip install -r requirements.txt)
 cp config.sh.example config.sh       # renseigner URL + token / set URL + token
 flagship config.sh                   # (ou ./flagship.sh config.sh)
+flagship --offline config.sh         # hors ligne : cache local seulement, aucun appel à l'API
 ```
 
 ---

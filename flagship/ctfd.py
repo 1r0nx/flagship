@@ -7,8 +7,11 @@ with a message the TUI can display.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import requests
+
+from . import shutdown
 
 
 class CTFdError(RuntimeError):
@@ -48,7 +51,7 @@ class CTFd:
     def _json(r: requests.Response) -> dict:
         # clear messages depending on the HTTP code
         if r.status_code in (401, 403):
-            raise CTFdError("access denied: invalid/expired token or locked challenge (HTTP %d)" % r.status_code)
+            raise CTFdError(f"access denied: invalid/expired token or locked challenge (HTTP {r.status_code})")
         if r.status_code == 429:
             raise CTFdError("too many requests (429): try again in a moment (CTFd rate limit)")
         if r.status_code == 404:
@@ -58,7 +61,7 @@ class CTFd:
         try:
             data = r.json()
         except ValueError:
-            raise CTFdError(f"non-JSON response (HTTP {r.status_code}): does the URL really point to a CTFd?")
+            raise CTFdError(f"non-JSON response (HTTP {r.status_code}): does the URL really point to a CTFd?") from None
         if isinstance(data, dict) and data.get("success") is False:
             raise CTFdError(str(data.get("message") or data.get("errors") or "API failure"))
         # some messages (CTF over/not started) arrive without "success"
@@ -157,7 +160,8 @@ class CTFd:
         """Team mode: per-member contribution, from the team's solves.
 
         Each CTFd solve carries the member who solved it (`user: {id, name}`), so a single call
-        is enough. Returns [{user_id, name, count, solved_ids}] (members with at least 1 solve).
+        is enough. Returns [{user_id, name, count, solved_ids, solves}] where `solves` is
+        [{challenge_id, date}] for each member (members with at least 1 solve).
         """
         if not self.is_team_mode():
             return []
@@ -173,19 +177,19 @@ class CTFd:
                 continue
             m = agg.setdefault(int(uid), {"user_id": int(uid),
                                           "name": u.get("name", f"#{uid}"),
-                                          "count": 0, "solved_ids": []})
+                                          "count": 0, "solved_ids": [], "solves": []})
             cid = s.get("challenge_id") or (s.get("challenge") or {}).get("id")
             m["count"] += 1
             if cid is not None:
                 m["solved_ids"].append(int(cid))
+                m["solves"].append({"challenge_id": int(cid), "date": s.get("date") or ""})
         return list(agg.values())
 
     def first_blood(self, cid: int) -> str | None:
-        """Name of the first solver of a challenge (first blood), if available."""
-        try:
-            d = self._get(f"/api/v1/challenges/{cid}/solves").get("data", []) or []
-        except CTFdError:
-            return None
+        """Name of the first solver of a challenge (first blood). None = nobody has solved it yet.
+        Raises CTFdError when the platform refuses (e.g. the CTF is over): callers must be able to
+        tell "no solver yet" from "unavailable", or the back-off on failures never kicks in."""
+        d = self._get(f"/api/v1/challenges/{cid}/solves").get("data", []) or []
         return d[0].get("name") if d else None
 
     def challenge_solvers(self, cid: int) -> list[dict] | None:
@@ -278,8 +282,12 @@ class CTFd:
         u = file_path if file_path.startswith("http") else self.url + file_path
         try:
             r = self._session.get(u, timeout=self.timeout * 4, stream=True)
+        except requests.RequestException as e:
+            return "error", str(e)
+        try:
             r.raise_for_status()
         except requests.RequestException as e:
+            r.close()  # a streamed response left open would hold its connection
             return "error", str(e)
         size = int(r.headers.get("Content-Length") or 0)
         if size and size > max_bytes:
@@ -292,29 +300,61 @@ class CTFd:
         return file_path if file_path.startswith("http") else self.url + file_path
 
 
+class OfflineCTFd:
+    """Stand-in for `CTFd` under `--offline`: no network call is ever made.
+
+    Every method returns `None`, exactly like `CTFd` when the server is unreachable (scoreboard,
+    notifications, solve histories...): the calling code then falls back to the local cache.
+    """
+
+    def __init__(self, url: str = ""):
+        self.url = url.rstrip("/")
+
+    def __getattr__(self, name: str):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return lambda *args, **kwargs: None
+
+
 def _stream_to(r: requests.Response, dest, max_bytes: int, on_bytes=None, total: int = 0) -> tuple[str, str]:
-    """Write the stream to dest while honouring a max size (2 GB safeguard).
+    """Write the stream to dest while honouring a max size (2 GB safeguard) and a quit request.
+
+    The data goes to `<dest>.part` and is renamed to `dest` only once complete, so a download that is
+    interrupted (error, quit, kill) never leaves a truncated file under its final name: the next run
+    would otherwise see it as "already present" and never complete it.
     Calls `on_bytes(written, total)` as data arrives, if given (total=0 means size unknown)."""
-    written = 0
+    dest = Path(dest)
+    part = dest.with_name(dest.name + ".part")
     try:
-        with open(dest, "wb") as f:
+        return _write_stream(r, dest, part, max_bytes, on_bytes, total)
+    finally:
+        r.close()  # release the connection even when the stream was not read to the end
+
+
+def _write_stream(r, dest: Path, part: Path, max_bytes: int, on_bytes, total: int) -> tuple[str, str]:
+    written = 0
+
+    def discard() -> None:
+        try:
+            part.unlink()
+        except OSError:
+            pass
+
+    try:
+        with open(part, "wb") as f:
             for chunk in r.iter_content(65536):
+                if shutdown.requested():
+                    discard()
+                    return "error", "stopped (quit requested)"
                 written += len(chunk)
                 if written > max_bytes:
-                    f.close()
-                    try:
-                        os.remove(dest)
-                    except OSError:
-                        pass
+                    discard()
                     return "manual", "> 2 GB (aborted)"
                 f.write(chunk)
                 if on_bytes:
                     on_bytes(written, total)
+        os.replace(part, dest)
     except (OSError, requests.RequestException) as e:
-        # remove the partial file so a later retry can download it again
-        try:
-            os.remove(dest)
-        except OSError:
-            pass
+        discard()  # the partial file is removed so a later retry downloads it again
         return "error", str(e)
     return "ok", f"{written} B"

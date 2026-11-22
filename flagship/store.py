@@ -5,8 +5,8 @@ Conventions:
   (the <base_dir> root stays reserved for config.sh, PROGRESS.md, .flagship/…)
 - naming: spaces -> '-', never consecutive dashes; on a name collision within the same
   category, the challenge id is appended as a suffix.
-- downloaded files go in <challenge>/work/; desc.txt/downloads.txt at the challenge root.
-- idempotent: never deletes/overwrites an existing desc.txt; desc/hint changes -> descN.txt.
+- downloaded files go in <nom-du-challenge>/work/; <nom-du-challenge>.txt/downloads.txt at the challenge root.
+- idempotent: never deletes/overwrites an existing <nom-du-challenge>.txt; desc/hint changes -> <nom-du-challenge>-vN.txt.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -25,6 +26,7 @@ from pathlib import Path
 
 import requests
 
+from . import shutdown
 from .ctfd import CTFd, CTFdError, _stream_to
 
 MAX_BYTES = 2 * 1024**3  # 2 GB: beyond that -> manual
@@ -38,6 +40,16 @@ _SHELL_SPECIAL = re.compile(r"""['"`$!;&|()<>{}\[\]*?~#=%^]""")
 _SPACES = re.compile(r"\s+")
 _DASHES = re.compile(r"-{2,}")
 _URL_RE = re.compile(r'https?://[^\s<>"\')\]]+')
+
+
+# ------------------------------------------------------------------ atomic writes
+def write_text_atomic(path, text: str) -> None:
+    """Write a whole text file in one step: a temporary sibling, then a rename. A quit or a crash in
+    the middle of the write leaves the previous version (or nothing), never a truncated file."""
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
 
 
 # ------------------------------------------------------------------ naming
@@ -80,7 +92,47 @@ def assign_paths(challenges: list[dict], base_dir: Path) -> None:
                 ch["path"] = str(root / cat / f"{name}-{ch.get('id')}")
 
 
-# ------------------------------------------------------------------ desc.txt
+# ------------------------------------------------------------------ <nom-du-challenge>.txt
+def _desc_name(folder_name: str, version: int = 1) -> str:
+    """<nom-du-challenge>.txt for the statement, <nom-du-challenge>-vN.txt once the statement changed."""
+    return f"{folder_name}.txt" if version == 1 else f"{folder_name}-v{version}.txt"
+
+
+def migrate_desc_names(d: Path) -> list:
+    """Rename legacy desc.txt / descN.txt files in a challenge folder to the <nom-du-challenge>.txt scheme.
+    Never overwrites: if the target already exists, the legacy file is left as it is."""
+    moved = []
+    for p in sorted(d.glob("desc*.txt")):
+        m = re.fullmatch(r"desc(\d*)\.txt", p.name)
+        if not m:
+            continue
+        target = d / _desc_name(d.name, int(m.group(1) or 1))
+        if target.exists():
+            continue
+        p.rename(target)
+        moved.append((p.name, target.name))
+    return moved
+
+
+def ensure_notes(d: Path, summary: dict) -> Path:
+    """Create the notes file <nom-du-challenge>.md (skeleton) if it is missing. Never overwrites it."""
+    notes = d / f"{d.name}.md"
+    if not notes.exists():
+        notes.write_text(
+            f"# {summary.get('name','?')}\n"
+            f"**Category:** {summary.get('category','?')} | "
+            f"**Points:** {summary.get('value','?')}\n\n## Notes\n\n", encoding="utf-8")
+    return notes
+
+
+def desc_file(d: Path, version: int = 1) -> Path:
+    """Path of the statement file of a challenge folder (also migrates legacy names first)."""
+    d = Path(d)
+    if d.is_dir():
+        migrate_desc_names(d)
+    return d / _desc_name(d.name, version)
+
+
 def clean_desc(desc: str | None) -> str:
     if not desc:
         return ""
@@ -193,7 +245,7 @@ def _load_state(d: Path) -> dict:
 
 
 def _save_state(d: Path, state: dict) -> None:
-    _state_path(d).write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_text_atomic(_state_path(d), json.dumps(state, ensure_ascii=False, indent=2))
 
 
 def _hint_events(old, new, name):
@@ -214,6 +266,11 @@ def _hint_events(old, new, name):
 
 
 # ------------------------------------------------------------------ downloads
+def file_name_of(file_path: str) -> str:
+    """Local file name for a platform file path (query string dropped, sanitised)."""
+    return slugify_filename(Path(file_path.split("?")[0]).name)
+
+
 def _filename_from(r: requests.Response, url: str) -> str:
     cd = r.headers.get("Content-Disposition", "")
     m = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)', cd)
@@ -233,7 +290,7 @@ def _dropbox_direct(url: str) -> str:
 
 def _looks_like_page(r: requests.Response) -> bool:
     """True if the response is a web page (HTML), not a downloadable file.
-    A page link is kept in desc.txt but NOT saved into work/."""
+    A page link is kept in <nom-du-challenge>.txt but NOT saved into work/."""
     if "attachment" in r.headers.get("Content-Disposition", "").lower():
         return False  # server explicitly offers a file to save
     ctype = r.headers.get("Content-Type", "").split(";")[0].strip().lower()
@@ -285,9 +342,9 @@ def download_external(url: str, dest_dir: Path, max_bytes: int = MAX_BYTES, on_b
         r.raise_for_status()
     except requests.RequestException as e:
         return "error", str(e)
-    if _looks_like_page(r):  # a web page, not a file: keep the link in desc.txt only
+    if _looks_like_page(r):  # a web page, not a file: keep the link in <nom-du-challenge>.txt only
         r.close()
-        return "page", "web page, left in desc.txt (not downloaded)"
+        return "page", "web page, left in <nom-du-challenge>.txt (not downloaded)"
     size = int(r.headers.get("Content-Length") or 0)
     if size and size > max_bytes:
         r.close()
@@ -299,7 +356,25 @@ def download_external(url: str, dest_dir: Path, max_bytes: int = MAX_BYTES, on_b
     return _stream_to(r, dest, max_bytes, on_bytes=on_bytes, total=size)
 
 
-def _do_downloads(client, d: Path, detail, file_urls, ext_links, on_file=None, on_bytes=None) -> list[str]:
+_SETTLED = ("ok", "skip", "page")  # external links that need no new request on a later pass
+_REPORT_LINE = re.compile(r"^\[(\w+)\] (.+?) : ")
+
+
+def _settled_links(d: Path) -> dict[str, str]:
+    """{target: report line} of the previous pass for external links that are settled (fetched,
+    already present, or a web page). Re-requesting them on every full sync is pure waste."""
+    p = d / "downloads.txt"
+    if not p.exists():
+        return {}
+    out = {}
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        m = _REPORT_LINE.match(line)
+        if m and m.group(1) in _SETTLED:
+            out[m.group(2)] = line
+    return out
+
+
+def _do_downloads(client, d: Path, detail, ext_links, on_file=None, on_bytes=None) -> list[str]:
     """Download a challenge's files into work/. Optional progress callbacks (used by the single
     `d` download): `on_file(name, index, n_items)` when each file starts, `on_bytes(name, written,
     total)` as its bytes arrive. Both are None in the parallel sync paths (no per-file bar there)."""
@@ -310,7 +385,9 @@ def _do_downloads(client, d: Path, detail, file_urls, ext_links, on_file=None, o
     n_items = len(files) + len(ext_links)
     idx = 0
     for f in files:
-        base = Path(f.split("?")[0]).name
+        if shutdown.requested():
+            break
+        base = file_name_of(f)
         idx += 1
         if on_file:
             on_file(base, idx, n_items)
@@ -321,21 +398,27 @@ def _do_downloads(client, d: Path, detail, file_urls, ext_links, on_file=None, o
         cb = (lambda w, t, _n=base: on_bytes(_n, w, t)) if on_bytes else None
         status, info = client.download(f, dest, on_bytes=cb)
         report.append(f"[{status}] work/{base} : {info}")
+    settled = _settled_links(d)
     for u in ext_links:
+        if shutdown.requested():
+            break
         idx += 1
         name = u.split("?")[0].rstrip("/").split("/")[-1] or u
+        if u in settled:  # already handled by an earlier pass: keep its report line, no request
+            report.append(settled[u])
+            continue
         if on_file:
             on_file(name, idx, n_items)
         cb = (lambda w, t, _n=name: on_bytes(_n, w, t)) if on_bytes else None
         status, info = download_external(u, work, on_bytes=cb)
         report.append(f"[{status}] {u} : {info}")
     if report:
-        (d / "downloads.txt").write_text(
+        write_text_atomic(d / "downloads.txt",
             "# Flagship download report (files -> work/)\n"
             "# ok = downloaded · skip = already present (not overwritten) · "
-            "page = web page (kept in desc.txt, not saved) · "
-            "manual = to be done by hand (link in desc.txt) · error\n\n"
-            + "\n".join(report) + "\n", encoding="utf-8")
+            "page = web page (kept in <nom-du-challenge>.txt, not saved) · "
+            "manual = to be done by hand (link in <nom-du-challenge>.txt) · error\n\n"
+            + "\n".join(report) + "\n")
     return report
 
 
@@ -357,12 +440,16 @@ def _auto_unlock_free(client, detail: dict) -> dict:
 
 
 def ensure_challenge(client: CTFd, base_dir: Path, summary: dict, watch: bool,
-                     auto_free_hints: bool = False, on_file=None, on_bytes=None):
+                     auto_free_hints: bool = False, on_file=None, on_bytes=None, auto_notes: bool = False):
     d = Path(summary["path"]) if summary.get("path") else challenge_dir(
         base_dir, summary.get("category", ""), summary.get("name", ""))
+    if shutdown.requested():  # quitting: start nothing new
+        return d, [], None
     (d / "work").mkdir(parents=True, exist_ok=True)
+    if auto_notes:
+        ensure_notes(d, summary)
     events, name = [], summary.get("name", "?")
-    desc = d / "desc.txt"
+    desc = desc_file(d)
 
     need_detail = watch or not desc.exists()
     detail = client.challenge(summary["id"]) if need_detail else None
@@ -371,15 +458,15 @@ def ensure_challenge(client: CTFd, base_dir: Path, summary: dict, watch: bool,
     if auto_free_hints:
         detail = _auto_unlock_free(client, detail)
 
-    file_urls = [(Path(f.split("?")[0]).name, client.file_url(f)) for f in (detail.get("files") or [])]
+    file_urls = [(file_name_of(f), client.file_url(f)) for f in (detail.get("files") or [])]
     ext_links = extract_links(detail.get("description"))
     desc_hash = _sig(clean_desc(detail.get("description")))
     hints_now = _hints_state(detail)
     state = _load_state(d)
 
     if not desc.exists():
-        desc.write_text(_desc_text(detail, file_urls, ext_links), encoding="utf-8")
-        _do_downloads(client, d, detail, file_urls, ext_links, on_file, on_bytes)
+        write_text_atomic(desc, _desc_text(detail, file_urls, ext_links))
+        _do_downloads(client, d, detail, ext_links, on_file, on_bytes)
         _save_state(d, {"desc_hash": desc_hash, "hints": hints_now, "version": 1})
         events.append({"kind": "new", "name": name})
         return d, events, detail
@@ -399,42 +486,54 @@ def ensure_challenge(client: CTFd, base_dir: Path, summary: dict, watch: bool,
         if desc_changed:
             what.append("description")
             events.append({"kind": "desc", "name": name, "version": version,
-                           "msg": f"description changed → desc{version}.txt"})
+                           "msg": f"description changed → {_desc_name(d.name, version)}"})
         if hints_changed:
             what.append("hints")
         events.extend(hint_evs)
         ts = datetime.now().strftime("%Y-%m-%d %H:%M")
         header = f"# Version {version} · {ts} (changed: {', '.join(what)})\n\n"
-        (d / f"desc{version}.txt").write_text(_desc_text(detail, file_urls, ext_links, header), encoding="utf-8")
+        write_text_atomic(desc_file(d, version), _desc_text(detail, file_urls, ext_links, header))
         _save_state(d, {"desc_hash": desc_hash, "hints": hints_now, "version": version})
     return d, events, detail
 
 
-def download_one(client, base_dir, summary, watch=True, auto_free_hints=False, on_file=None, on_bytes=None):
+def download_one(client, base_dir, summary, watch=True, auto_free_hints=False, on_file=None, on_bytes=None, auto_notes: bool = False):
     """Download/complete ONE challenge, in a SELF-HEALING way.
 
-    - always goes through `ensure_challenge` → recreates `desc.txt` (+ state) if missing, then
+    - always goes through `ensure_challenge` → recreates `<nom-du-challenge>.txt` (+ state) if missing, then
       downloads the files ("new" branch);
     - if the folder already existed, (re)completes missing/failed files in `work/`
       (idempotent: files already present are skipped).
-    Returns (path, events). Never a `work/`/`downloads.txt` without `desc.txt`.
+    Returns (path, events). Never a `work/`/`downloads.txt` without `<nom-du-challenge>.txt`.
     """
     d, events, detail = ensure_challenge(client, base_dir, summary, watch, auto_free_hints,
-                                         on_file=on_file, on_bytes=on_bytes)
-    fresh = any(e.get("kind") == "new" for e in events)  # desc.txt was just (re)created -> already downloaded
-    if not fresh:
-        if detail is None:
-            detail = client.challenge(summary["id"])
-            if auto_free_hints:
-                detail = _auto_unlock_free(client, detail)
-        file_urls = [(Path(f.split("?")[0]).name, client.file_url(f)) for f in (detail.get("files") or [])]
-        ext_links = extract_links(detail.get("description"))
-        _do_downloads(client, d, detail, file_urls, ext_links, on_file, on_bytes)
+                                         on_file=on_file, on_bytes=on_bytes, auto_notes=auto_notes)
+    if not _is_fresh(events):
+        complete_downloads(client, d, summary, detail, auto_free_hints, on_file, on_bytes)
     return str(d), events
 
 
+def _is_fresh(events: list[dict]) -> bool:
+    """True when ensure_challenge just created the statement, i.e. its files were already downloaded."""
+    return any(e.get("kind") == "new" for e in events)
+
+
+def complete_downloads(client, d: Path, summary: dict, detail: dict | None, auto_free_hints: bool = False,
+                       on_file=None, on_bytes=None) -> list[str]:
+    """(Re)complete the files of one challenge: whatever is missing in work/ is downloaded, what is
+    already there is skipped. `detail` may be None (fetched here if needed)."""
+    if shutdown.requested():  # quitting: start nothing new
+        return []
+    if detail is None:
+        detail = client.challenge(summary["id"])
+        if auto_free_hints:
+            detail = _auto_unlock_free(client, detail)
+    ext_links = extract_links(detail.get("description"))
+    return _do_downloads(client, d, detail, ext_links, on_file, on_bytes)
+
+
 def list_state(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints: bool = False,
-               should_stop=None, on_connected=None, on_listed=None, workers: int = 6):
+               should_stop=None, on_connected=None, on_listed=None, workers: int = 6, auto_notes: bool = False):
     """LIGHT mode: list without downloading. Re-checks changes for already-downloaded ones.
 
     `should_stop` is an optional callable: when it returns True (e.g. the app is quitting), the
@@ -457,7 +556,7 @@ def list_state(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints
     # cheap first pass (filesystem + set membership, no network): enough to render the list now
     for ch in challenges:
         d = Path(ch["path"])
-        ch["downloaded"] = (d / "desc.txt").exists()
+        ch["downloaded"] = desc_file(d).exists()
         ch["solved"] = int(ch.get("id", -1)) in solved or _has_flag(str(d))
     if on_listed:
         on_listed(challenges)
@@ -470,10 +569,10 @@ def list_state(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints
         todo = [ch for ch in challenges if ch["downloaded"]]
 
         def _watch_one(ch):
-            if should_stop and should_stop():  # queued task reached after a quit: skip the GET
+            if (should_stop and should_stop()) or shutdown.requested():  # quitting: skip the GET
                 return []
             try:
-                _, evs, detail = ensure_challenge(client, base_dir, ch, True, auto_free_hints)
+                _, evs, detail = ensure_challenge(client, base_dir, ch, True, auto_free_hints, auto_notes=auto_notes)
                 if detail:
                     ch["_detail"] = detail
                 return evs
@@ -499,7 +598,7 @@ def list_state(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints
 
 
 def sync(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints: bool = False,
-         workers: int = 6, progress=None):
+         workers: int = 6, progress=None, auto_notes: bool = False):
     """FULL mode ("Sync all"), PARALLEL downloads + progress."""
     base_dir.mkdir(parents=True, exist_ok=True)
     challenges = client.challenges()
@@ -509,9 +608,13 @@ def sync(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints: bool
     total, done = len(challenges), 0
 
     def task(ch):
+        if shutdown.requested():
+            return []
         try:
-            _, evs, detail = ensure_challenge(client, base_dir, ch, watch, auto_free_hints)
-            ch["downloaded"] = (Path(ch["path"]) / "desc.txt").exists()
+            d, evs, detail = ensure_challenge(client, base_dir, ch, watch, auto_free_hints, auto_notes=auto_notes)
+            if not _is_fresh(evs):  # "download all" also completes files missing from known challenges
+                complete_downloads(client, d, ch, detail, auto_free_hints)
+            ch["downloaded"] = desc_file(Path(ch["path"])).exists()
             if detail:
                 ch["_detail"] = detail
             return evs
@@ -535,7 +638,7 @@ def sync(client: CTFd, base_dir: Path, watch: bool = True, auto_free_hints: bool
 
 
 def download_subset(client: CTFd, base_dir: Path, summaries: list[dict], watch: bool = True,
-                    auto_free_hints: bool = False, workers: int = 6, progress=None):
+                    auto_free_hints: bool = False, workers: int = 6, progress=None, auto_notes: bool = False):
     """Download a SUBSET of challenges (e.g. a category), in parallel.
 
     `summaries` are already-listed entries (with their `path`). The dicts are mutated in place
@@ -546,11 +649,13 @@ def download_subset(client: CTFd, base_dir: Path, summaries: list[dict], watch: 
     total, done = len(summaries), 0
 
     def task(ch):
+        if shutdown.requested():
+            return []
         try:
-            _, evs, detail = ensure_challenge(client, base_dir, ch, watch, auto_free_hints)
-            d = Path(ch["path"]) if ch.get("path") else challenge_dir(
-                base_dir, ch.get("category", ""), ch.get("name", ""))
-            ch["downloaded"] = (d / "desc.txt").exists()
+            d, evs, detail = ensure_challenge(client, base_dir, ch, watch, auto_free_hints, auto_notes=auto_notes)
+            if not _is_fresh(evs):
+                complete_downloads(client, d, ch, detail, auto_free_hints)
+            ch["downloaded"] = desc_file(d).exists()
             if detail:
                 ch["_detail"] = detail
             return evs
@@ -615,7 +720,7 @@ def save_json(base_dir: Path, name: str, data) -> None:
     try:
         d = base_dir / ".flagship"
         d.mkdir(parents=True, exist_ok=True)
-        (d / name).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        write_text_atomic(d / name, json.dumps(data, ensure_ascii=False))
     except (OSError, TypeError):
         pass
 
@@ -635,8 +740,16 @@ def save_cache(base_dir: Path, challenges: list[dict]) -> None:
 
 
 def load_cache(base_dir: Path) -> list[dict]:
-    """Read back the last synced challenge list (empty list if none)."""
-    return load_json(base_dir, "challenges_cache.json", []) or []
+    """Read back the last synced challenge list (empty list if none).
+
+    The cached `path`s are absolute and may come from another machine (or a moved folder): they are
+    re-anchored on this `base_dir`, and `downloaded` is checked against the disk, so offline views
+    read the files that really exist here."""
+    challenges = load_json(base_dir, "challenges_cache.json", []) or []
+    assign_paths(challenges, base_dir)
+    for ch in challenges:
+        ch["downloaded"] = desc_file(Path(ch["path"])).exists()
+    return challenges
 
 
 def last_sync_at(base_dir: Path) -> datetime | None:
@@ -657,7 +770,7 @@ def write_flag(path, flag: str) -> None:
     d.mkdir(parents=True, exist_ok=True)
     p = d / "flag.txt"
     if not p.exists():
-        p.write_text(flag.strip() + "\n", encoding="utf-8")
+        write_text_atomic(p, flag.strip() + "\n")
 
 
 def read_flag(path) -> str | None:
@@ -714,7 +827,7 @@ def record_attempt(base_dir: Path, cid: int, flag: str, correct: bool, path: str
         lst = data.setdefault(str(cid), [])
         if flag not in lst:
             lst.append(flag)
-        p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        write_text_atomic(p, json.dumps(data, ensure_ascii=False))
     except (OSError, TypeError):
         pass
 
@@ -727,7 +840,7 @@ def _md_cell(value) -> str:
 
 def write_progress(base_dir: Path, challenges: list[dict], ctf_name: str = "CTF") -> Path:
     """Generate a PROGRESS_flagship.md summary at the root of base_dir."""
-    rows = sorted(challenges, key=lambda c: (c.get("category", ""), c.get("value", 0), c.get("name", "")))
+    rows = sorted(challenges, key=lambda c: (c.get("category") or "", c.get("value") or 0, c.get("name") or ""))
     solved = sum(1 for c in challenges if c.get("solved"))
     dl = sum(1 for c in challenges if c.get("downloaded"))
     lines = [
@@ -744,7 +857,7 @@ def write_progress(base_dir: Path, challenges: list[dict], ctf_name: str = "CTF"
             f"{'✓' if c.get('downloaded') else ''} |")
     # DISTINCT name: never overwrite a PROGRESS.md the user maintains by hand
     out = base_dir / "PROGRESS_flagship.md"
-    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_atomic(out, "\n".join(lines) + "\n")
     return out
 
 
@@ -770,5 +883,5 @@ def write_flags(base_dir: Path, challenges: list[dict], ctf_name: str = "CTF") -
         lines.append(f"| {_md_cell(cat)} | {_md_cell(name)} | {value} | "
                      f"{('`'+_md_cell(flag)+'`') if flag else '(unknown)'} |")
     out = base_dir / "FLAGS_flagship.md"
-    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_atomic(out, "\n".join(lines) + "\n")
     return out

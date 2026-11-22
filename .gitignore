@@ -3,6 +3,8 @@ config.sh
 
 # python
 __pycache__/
+.pytest_cache/
+.ruff_cache/
 *.pyc
 .venv/
 

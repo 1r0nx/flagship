@@ -8,12 +8,13 @@ Expected format (`KEY=value` lines; `export` and quotes tolerated):
     CTF_NAME=MyCTF              # displayed name / default folder (optional)
     POLL_INTERVAL=60             # seconds between two auto syncs (0 = disabled)
     WRITE_FLAG_ON_SOLVE=true     # write flag.txt when a flag is accepted
-    WATCH_CHANGES=true           # track desc/hint changes (desc2.txt…)
+    WATCH_CHANGES=true           # track desc/hint changes (<nom-du-challenge>-v2.txt…)
     WATCH_INTERVAL=300           # min seconds between two full watch passes (0 = every poll)
     AUTO_UNLOCK_FREE_HINTS=false # automatically unlock free hints
+    AUTO_NOTES=false             # create <nom-du-challenge>.md notes automatically
     DOWNLOAD_WORKERS=6           # parallel downloads for "Sync all"
     THEME=textual-dark           # start colour theme
-    EDITOR=nano                  # command used to edit notes.md (e.g. vim, subl, code)
+    EDITOR=nano                  # command used to edit the notes <nom-du-challenge>.md (e.g. vim, subl, code)
 
 The token is never displayed nor executed (no shell `source`; plain KEY=value parsing).
 """
@@ -43,11 +44,12 @@ def parse_sh(path: Path) -> dict[str, str]:
         m = _LINE.match(raw)
         if not m:
             continue
-        key, val = m.group(1), _strip_quotes(m.group(2))
-        # strip a possible unquoted end-of-line comment
-        if val and val[0] not in "\"'" and "#" in val:
-            val = val.split("#", 1)[0].strip()
-        data[key] = val
+        key, raw_val = m.group(1), m.group(2)
+        # an UNQUOTED value may end with a "# comment": decide on the raw text, before unquoting
+        # (otherwise a quoted "ab#cd" would look like an unquoted value and be cut at the '#')
+        if raw_val[:1] not in ("\"", "'") and "#" in raw_val:
+            raw_val = raw_val.split("#", 1)[0].strip()
+        data[key] = _strip_quotes(raw_val)
     return data
 
 
@@ -79,7 +81,8 @@ class Config:
     auto_unlock_free_hints: bool  # automatically unlock cost-0 hints
     download_workers: int  # parallel downloads for "Sync all"
     theme: str  # start colour theme (e.g. textual-dark, nord, gruvbox, dracula…)
-    editor: str  # command used to edit notes.md (e.g. nano, vim, subl, code); empty = $EDITOR/$VISUAL then nano
+    editor: str  # command used to edit the notes (e.g. nano, vim, subl, code); empty = $EDITOR/$VISUAL then nano
+    auto_notes: bool  # create <nom-du-challenge>.md notes automatically for each challenge (never overwritten)
     config_dir: Path  # folder holding config.sh (reference for displaying paths relatively)
 
     @classmethod
@@ -127,5 +130,6 @@ class Config:
             download_workers=max(1, _as_int(d.get("DOWNLOAD_WORKERS"), 6)),
             theme=(d.get("THEME") or "textual-dark").strip(),
             editor=(d.get("EDITOR") or "").strip(),
+            auto_notes=_as_bool(d.get("AUTO_NOTES"), False),
             config_dir=path.parent,
         )

@@ -14,8 +14,14 @@ dependencies = [
     "gdown>=5.0",
 ]
 
+[project.optional-dependencies]
+test = ["pytest>=8", "ruff>=0.5"]
+
 [project.scripts]
-flagship = "flagship.app:main"
+flagship = "flagship.app:cli"
 
 [tool.setuptools]
 packages = ["flagship"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
