@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import threading
+import zipfile
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -47,7 +48,8 @@ def write_text_atomic(path, text: str) -> None:
     """Write a whole text file in one step: a temporary sibling, then a rename. A quit or a crash in
     the middle of the write leaves the previous version (or nothing), never a truncated file."""
     path = Path(path)
-    tmp = path.with_name(path.name + ".tmp")
+    # unique temporary name: two threads saving the same file must not rename each other's temp file
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, path)
 
@@ -884,4 +886,65 @@ def write_flags(base_dir: Path, challenges: list[dict], ctf_name: str = "CTF") -
                      f"{('`'+_md_cell(flag)+'`') if flag else '(unknown)'} |")
     out = base_dir / "FLAGS_flagship.md"
     write_text_atomic(out, "\n".join(lines) + "\n")
+    return out
+
+
+# ------------------------------------------------------------------ notes export
+# The skeleton written by ensure_notes(): a title, the category/points line and the "## Notes" heading.
+_SKELETON_LINES = (
+    re.compile(r"^# .*$"),
+    re.compile(r"^\*\*Category:\*\* .* \| \*\*Points:\*\* .*$"),
+    re.compile(r"^## Notes$"),
+)
+
+
+def is_skeleton_only(text: str) -> bool:
+    """True when a notes file holds nothing but Flagship's template (no text written by the player)."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    return all(any(p.match(ln) for p in _SKELETON_LINES) for ln in lines)
+
+
+def collect_notes(base_dir: Path) -> list[tuple[str, str, bool, Path]]:
+    """Every written challenge note on disk: (category, challenge, solved, note path), sorted.
+    `solved` means the challenge has a flag.txt. Skeleton-only notes are not written notes."""
+    root = base_dir / CHALLENGES
+    entries = []
+    for note in sorted(root.glob("*/*/*.md")):
+        folder = note.parent
+        if note.name != f"{folder.name}.md":
+            continue
+        if is_skeleton_only(note.read_text(encoding="utf-8", errors="replace")):
+            continue
+        entries.append((folder.parent.name, folder.name, (folder / "flag.txt").exists(), note))
+    return entries
+
+
+def export_notes(base_dir: Path, ctf_name: str = "CTF", solved_only: bool = False) -> Path | None:
+    """Zip the written challenge notes (all, or only the solved ones), in the
+    CHALLENGES/<Category>/<Challenge>/ layout, plus an INDEX.md. Only notes are read from disk: no flag,
+    no work/ file, no config. Returns the zip path, or None when there is nothing to export."""
+    entries = [e for e in collect_notes(base_dir) if e[2] or not solved_only]
+    if not entries:
+        return None
+
+    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    out = base_dir / f"notes-export-{stamp}.zip"
+    n = 1
+    while out.exists():  # never overwrite an earlier export made within the same second
+        n += 1
+        out = base_dir / f"notes-export-{stamp}-{n}.zip"
+    tmp = out.with_name(out.name + f".{os.getpid()}.{threading.get_ident()}.tmp")
+
+    rows = [f"| {_md_cell(cat)} | {_md_cell(name)} | {'✔' if solved else ''} | "
+            f"[{name}.md](CHALLENGES/{cat}/{name}/{name}.md) |" for cat, name, solved, _ in entries]
+    index = "\n".join([
+        f"# Notes export · {ctf_name}", "",
+        f"{len(entries)} note(s) · generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}", "",
+        "| Category | Challenge | Solved | Note |", "|----------|-----------|--------|------|",
+        *rows]) + "\n"
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+        for cat, name, _solved, note in entries:
+            z.write(note, f"CHALLENGES/{cat}/{name}/{name}.md")
+        z.writestr("INDEX.md", index)
+    os.replace(tmp, out)
     return out

@@ -46,6 +46,7 @@ per-challenge notes. Flagship does all of it for you.
   for their solve history: challenge, category, points and date, most recent first)
 - Everything cached locally: browsable offline and after the CTF
 - Resizable panes, colour themes, Markdown export
+- Export all written notes at once, in one zip organised by category (`N`)
 - Six tabs: Challenges, Scoreboard, Stats, Flags, Notifications (platform
   announcements), Log (internal journal)
 
@@ -74,11 +75,11 @@ POLL_INTERVAL=60             # auto-sync every N seconds (0 = disabled)
 WRITE_FLAG_ON_SOLVE=true     # write flag.txt when a flag is accepted
 WATCH_CHANGES=true           # track desc/hint changes (false = lighter sync)
 WATCH_INTERVAL=300           # min seconds between two full watch passes (0 = every poll)
-AUTO_UNLOCK_FREE_HINTS=false # auto-unlock free (cost 0) hints
-AUTO_NOTES=false             # create <nom-du-challenge>.md notes automatically (never overwritten)
+AUTO_UNLOCK_FREE_HINTS=true # auto-unlock free (cost 0) hints
+AUTO_NOTES=true             # create <nom-du-challenge>.md notes automatically (never overwritten)
 DOWNLOAD_WORKERS=6           # parallel downloads for "Sync all"
-THEME=textual-dark           # start theme (`t` to cycle)
-EDITOR=nano                  # editor for notes (e.g. vim, subl, code)
+THEME=ansi-dark           # start theme (`t` to cycle)
+EDITOR=code                  # editor for notes (e.g. vim, subl, code)
 ```
 
 ## Run
@@ -131,6 +132,7 @@ A challenge that was never downloaded has no `<nom-du-challenge>.txt`, so its de
 | `c` / `w` | copy connection / open folder |
 | `e` | edit notes (`<nom-du-challenge>.md`) |
 | `p` / `P` | export progress / the Flags tab |
+| `N` | export written notes to one zip (`notes-export-*.zip`): asks all notes or solved only |
 | `A` | cache the whole scoreboard's solve history |
 | `Esc` | leave the active field |
 | drag `┃` | resize the panes (double-click: reset) |
@@ -179,6 +181,7 @@ MyCTF/                               # your CTF root (BASE_DIR)
 ├── config.sh                        # URL + token (never displayed)
 ├── PROGRESS_flagship.md             # generated progress table (press p)
 ├── FLAGS_flagship.md                # generated flags export (press P)
+├── notes-export-*.zip               # all written notes, by category (press N)
 ├── .flagship/                       # internal cache & state (leave it)
 └── CHALLENGES/
     ├── Crypto/

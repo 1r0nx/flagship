@@ -47,6 +47,7 @@ résolutions, tenir des notes par challenge. Flagship fait tout ça pour toi.
 - Tout mis en cache local: consultable hors-ligne et après le CTF
 - Panneaux redimensionnables, thèmes de couleur
 - Export Markdown des flags et de la progression
+- Export de toutes les notes rédigées en un seul zip, rangé par catégorie (`N`)
 - Six onglets : Challenges, Scoreboard, Stats, Flags, Notifications (annonces de la
   plateforme), Log (journal interne)
 
@@ -75,11 +76,11 @@ POLL_INTERVAL=60             # synchro auto toutes les N secondes (0 = désactiv
 WRITE_FLAG_ON_SOLVE=true     # écrire flag.txt quand un flag est validé
 WATCH_CHANGES=true           # suivre les changements desc/indices (false = synchro plus légère)
 WATCH_INTERVAL=300           # délai mini (s) entre deux passes de suivi complètes (0 = à chaque poll)
-AUTO_UNLOCK_FREE_HINTS=false # débloquer automatiquement les indices gratuits
-AUTO_NOTES=false             # créer automatiquement les notes <nom-du-challenge>.md (jamais écrasées)
+AUTO_UNLOCK_FREE_HINTS=true # débloquer automatiquement les indices gratuits
+AUTO_NOTES=true             # créer automatiquement les notes <nom-du-challenge>.md (jamais écrasées)
 DOWNLOAD_WORKERS=6           # téléchargements en parallèle pour "Sync all"
-THEME=textual-dark           # thème de départ (`t` pour cycler)
-EDITOR=nano                  # éditeur pour les notes (ex. vim, subl, code)
+THEME=ansi-dark           # thème de départ (`t` pour cycler)
+EDITOR=code                  # éditeur pour les notes (ex. vim, subl, code)
 ```
 
 ## Lancement
@@ -134,6 +135,7 @@ Un challenge jamais téléchargé n'a pas de `<nom-du-challenge>.txt` : sa descr
 | `c` / `w`            | copier la connexion / ouvrir le dossier                      |
 | `e`                  | éditer les notes (`<nom-du-challenge>.md`)                                |
 | `p` / `P`            | exporter la progression / l'onglet Flags                     |
+| `N`                  | exporter les notes rédigées dans un zip (`notes-export-*.zip`) : toutes ou résolues seulement |
 | `A`                  | mettre en cache l'historique de solves de tout le scoreboard |
 | `Échap`              | quitter le champ actif                                       |
 | glisser `┃`          | redimensionner les panneaux (double-clic : réinitialiser)    |
@@ -182,6 +184,7 @@ MonCTF/                             # racine de ton CTF (BASE_DIR)
 ├── config.sh                       # URL + token (jamais affiché)
 ├── PROGRESS_flagship.md            # tableau de progression généré (touche p)
 ├── FLAGS_flagship.md               # export des flags généré (touche P)
+├── notes-export-*.zip              # toutes les notes rédigées, par catégorie (touche N)
 ├── .flagship/                      # cache & état interne (ne pas toucher)
 └── CHALLENGES/
     ├── Crypto/

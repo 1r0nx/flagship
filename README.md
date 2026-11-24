@@ -15,6 +15,11 @@ flagship config.sh                   # (ou ./flagship.sh config.sh)
 flagship --offline config.sh         # hors ligne : cache local seulement, aucun appel à l'API
 ```
 
+## 🖱️ Souris dans tmux / Mouse in tmux
+
+- FR : avec `tmux-mighty-scroll`, ajouter `set -g @mighty-scroll-fallback-mode 'pass-through'` **avant** sa ligne `@plugin`, sinon la molette ne défile pas dans Flagship.
+- EN : with `tmux-mighty-scroll`, add `set -g @mighty-scroll-fallback-mode 'pass-through'` **before** its `@plugin` line, otherwise the wheel does not scroll Flagship.
+
 ---
 
 *Flagship a été conçu et développé avec [Claude Code](https://claude.com/claude-code).*  

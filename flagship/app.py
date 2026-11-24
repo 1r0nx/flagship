@@ -44,6 +44,7 @@ from textual.coordinate import Coordinate
 from textual.screen import ModalScreen
 from textual.strip import Strip
 from textual.widget import Widget
+from textual.widgets.option_list import Option
 from textual.widgets import (
     Button,
     DataTable,
@@ -51,6 +52,7 @@ from textual.widgets import (
     Header,
     Input,
     Markdown,
+    OptionList,
     ProgressBar,
     Static,
     TabbedContent,
@@ -288,6 +290,35 @@ SORT_LABEL = {
     "category": "category", "points": "points", "solves": "solves", "fewest": "fewest solves",
     "name": "name A→Z", "id": "CTFd id", "downloaded": "downloaded first", "unsolved": "unsolved first",
 }
+
+
+class ExportNotesScreen(ModalScreen[str | None]):
+    """Choose what the notes zip contains (press N). Returns "all", "solved", or None when cancelled."""
+    BINDINGS = [("escape", "cancel", "Cancel")]
+    CSS = """
+    ExportNotesScreen { align: center middle; }
+    #xbox { width: 64; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
+    #xlist { height: auto; max-height: 6; margin-top: 1; }
+    """
+
+    def __init__(self, written: int, solved: int):
+        super().__init__()
+        self._written = written
+        self._solved = solved
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="xbox"):
+            yield Static("Export notes: choose what goes in the zip (Esc to cancel)")
+            yield OptionList(
+                Option(f"All written notes ({self._written})", id="all"),
+                Option(f"Solved challenges only ({self._solved})", id="solved"),
+                id="xlist")
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(event.option.id)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class ConfirmScreen(ModalScreen[bool]):
@@ -621,6 +652,7 @@ class Flagship(App):
         ("w", "open_folder", "Folder"),
         ("e", "edit_notes", "Notes"),
         ("p", "export_progress", "Progress"),
+        ("N", "export_notes", "Notes zip"),
         ("P", "export_flags", "Flags"),
         ("A", "cache_all_solves", "Cache solves"),
         ("q", "quit", "Quit"),
@@ -2402,6 +2434,29 @@ class Flagship(App):
             self._emit(f"PROGRESS export failed: {e}", "error")
             return
         self._emit(f"📄 Progress exported: {self._rel_path(p)}", "information", 5)
+
+    def action_export_notes(self) -> None:
+        """Ask what to export, then zip the written notes (see store.export_notes). Works offline."""
+        entries = store.collect_notes(self.cfg.base_dir)
+        if not entries:
+            self.notify("No written notes to export yet (press `e` on a challenge).", severity="warning", timeout=6)
+            return
+        solved = sum(1 for e in entries if e[2])
+
+        def chosen(choice: str | None) -> None:
+            if choice is None:
+                return
+            try:
+                p = store.export_notes(self.cfg.base_dir, self.cfg.ctf_name, solved_only=(choice == "solved"))
+            except OSError as e:
+                self._emit(f"Notes export failed: {e}", "error")
+                return
+            if p is None:
+                self.notify("No notes match this choice (no solved challenge has notes).", severity="warning", timeout=6)
+                return
+            self._emit(f"🗒️ Notes exported: {self._rel_path(p)}", "information", 5)
+
+        self.push_screen(ExportNotesScreen(len(entries), solved), chosen)
 
     def action_export_flags(self) -> None:
         if not self.challenges:

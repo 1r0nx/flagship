@@ -46,9 +46,3 @@ def write_config(path: Path, url: str, base: Path, token: str = TOKEN, **extra: 
     lines += [f"{k}={v}" for k, v in extra.items()]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
-
-
-@pytest.fixture
-def cfg_file(tmp_path: Path, fake, base_dir) -> Path:
-    return write_config(tmp_path / "config.sh", fake.url, base_dir,
-                        POLL_INTERVAL="0", WATCH_CHANGES="true", WATCH_INTERVAL="0")

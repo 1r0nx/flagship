@@ -67,9 +67,6 @@ class FakeCTFd:
                      ctype: str = "application/json") -> None:
         self.overrides[(method, path)] = (status, body, ctype)
 
-    def clear_override(self, method: str, path: str) -> None:
-        self.overrides.pop((method, path), None)
-
     USER_IDS = {"me": 1, "mate": 2}
 
     def mark_solved(self, cid: int, by: str = "mate", date: str = "2026-11-20T10:00:00Z") -> None:
