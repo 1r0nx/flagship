@@ -21,6 +21,3 @@ flagship --offline config.sh         # hors ligne : cache local seulement, aucun
 - EN : with `tmux-mighty-scroll`, add `set -g @mighty-scroll-fallback-mode 'pass-through'` **before** its `@plugin` line, otherwise the wheel does not scroll Flagship.
 
 ---
-
-*Flagship a été conçu et développé avec [Claude Code](https://claude.com/claude-code).*  
-*Flagship was designed and built with [Claude Code](https://claude.com/claude-code).*
