@@ -80,6 +80,8 @@ AUTO_NOTES=true             # create <nom-du-challenge>.md notes automatically (
 DOWNLOAD_WORKERS=6           # parallel downloads for "Sync all"
 THEME=ansi-dark           # start theme (`t` to cycle)
 EDITOR=code                  # editor for notes (e.g. vim, subl, code)
+FLAG_PREFIX=HLB2026{           # pre-filled in the flag field when you press s (empty = none)
+FLAG_SUFFIX=}                 # pre-filled after the cursor: type only the inside (empty = none)
 ```
 
 ## Run

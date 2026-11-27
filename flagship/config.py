@@ -84,6 +84,8 @@ class Config:
     editor: str  # command used to edit the notes (e.g. nano, vim, subl, code); empty = $EDITOR/$VISUAL then nano
     auto_notes: bool  # create <nom-du-challenge>.md notes automatically for each challenge (never overwritten)
     config_dir: Path  # folder holding config.sh (reference for displaying paths relatively)
+    flag_prefix: str = ""  # text pre-filled before the cursor in the flag field when you press s (e.g. HLB2026{)
+    flag_suffix: str = ""  # text pre-filled after the cursor (e.g. }); empty = none
 
     @classmethod
     def load(cls, path: str | Path) -> Config:
@@ -130,6 +132,8 @@ class Config:
             download_workers=max(1, _as_int(d.get("DOWNLOAD_WORKERS"), 6)),
             theme=(d.get("THEME") or "textual-dark").strip(),
             editor=(d.get("EDITOR") or "").strip(),
+            flag_prefix=(d.get("FLAG_PREFIX") or "").strip(),
+            flag_suffix=(d.get("FLAG_SUFFIX") or "").strip(),
             auto_notes=_as_bool(d.get("AUTO_NOTES"), False),
             config_dir=path.parent,
         )

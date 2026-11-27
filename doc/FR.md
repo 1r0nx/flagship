@@ -81,6 +81,8 @@ AUTO_NOTES=true             # créer automatiquement les notes <nom-du-challenge
 DOWNLOAD_WORKERS=6           # téléchargements en parallèle pour "Sync all"
 THEME=ansi-dark           # thème de départ (`t` pour cycler)
 EDITOR=code                  # éditeur pour les notes (ex. vim, subl, code)
+FLAG_PREFIX=HLB2026{           # pré-rempli dans le champ de flag quand on appuie sur s (vide = aucun)
+FLAG_SUFFIX=}                 # pré-rempli après le curseur : on tape seulement l'intérieur (vide = aucun)
 ```
 
 ## Lancement

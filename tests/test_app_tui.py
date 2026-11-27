@@ -386,3 +386,79 @@ def test_cached_solve_histories_are_refreshed_only_when_their_score_changes(seed
             assert seeded.hits["GET /api/v1/users/3/solves"] == 2 and \
                 seeded.hits["GET /api/v1/users/2/solves"] == 1
     run(scenario())
+
+
+def test_flag_prefix_is_prefilled_and_only_the_inside_is_typed(seeded, base_dir, tmp_path):
+    """With FLAG_PREFIX set, pressing s pre-fills it; the player types only what goes between the braces."""
+    cfg = make_cfg(seeded.url, base_dir, tmp_path, FLAG_PREFIX="HLB{")
+
+    async def scenario():
+        app = tui.Flagship(cfg)
+        async with app.run_test(size=(170, 55)) as pilot:
+            await settle(app, pilot)
+            app.selected = next(leaf for leaf in leaves(app) if leaf["name"] == "Alpha")
+            await pilot.press("s")
+            await pilot.pause(0.1)
+            flag = app.query_one("#flag")
+            assert flag.value == "HLB{"
+            await pilot.press("a", "l", "p", "h", "a", "}", "enter")
+            await settle(app, pilot, 6)
+            assert seeded.submissions[-1] == (1, "HLB{alpha}")
+            assert app.query_one("#flag").value == "HLB{"  # back to the prefix, ready for the next flag
+    run(scenario())
+
+
+def test_flag_prefix_alone_is_never_submitted(seeded, base_dir, tmp_path):
+    cfg = make_cfg(seeded.url, base_dir, tmp_path, FLAG_PREFIX="HLB{")
+
+    async def scenario():
+        app = tui.Flagship(cfg)
+        async with app.run_test(size=(170, 55)) as pilot:
+            await settle(app, pilot)
+            app.selected = next(leaf for leaf in leaves(app) if leaf["name"] == "Alpha")
+            await pilot.press("s")
+            await pilot.pause(0.1)
+            before = len(seeded.submissions)
+            await pilot.press("enter")          # nothing typed between the braces
+            await settle(app, pilot, 4)
+            assert len(seeded.submissions) == before
+    run(scenario())
+
+
+def test_flag_prefix_and_suffix_leave_the_cursor_between_them(seeded, base_dir, tmp_path):
+    """HLB{|} : the template is shown with the cursor between the braces; the player only types the inside."""
+    cfg = make_cfg(seeded.url, base_dir, tmp_path, FLAG_PREFIX="HLB{", FLAG_SUFFIX="}")
+
+    async def scenario():
+        app = tui.Flagship(cfg)
+        async with app.run_test(size=(170, 55)) as pilot:
+            await settle(app, pilot)
+            app.selected = next(leaf for leaf in leaves(app) if leaf["name"] == "Alpha")
+            await pilot.press("s")
+            await pilot.pause(0.1)
+            flag = app.query_one("#flag")
+            assert flag.value == "HLB{}"
+            assert flag.cursor_position == len("HLB{")
+            await pilot.press("a", "l", "p", "h", "a", "enter")
+            await settle(app, pilot, 6)
+            assert seeded.submissions[-1] == (1, "HLB{alpha}")
+            assert app.query_one("#flag").value == "HLB{}"  # template restored after sending
+    run(scenario())
+
+
+def test_suffix_only_template_and_empty_inside_is_not_sent(seeded, base_dir, tmp_path):
+    cfg = make_cfg(seeded.url, base_dir, tmp_path, FLAG_SUFFIX="}")
+
+    async def scenario():
+        app = tui.Flagship(cfg)
+        async with app.run_test(size=(170, 55)) as pilot:
+            await settle(app, pilot)
+            app.selected = next(leaf for leaf in leaves(app) if leaf["name"] == "Alpha")
+            await pilot.press("s")
+            await pilot.pause(0.1)
+            assert app.query_one("#flag").value == "}"
+            before = len(seeded.submissions)
+            await pilot.press("enter")
+            await settle(app, pilot, 4)
+            assert len(seeded.submissions) == before
+    run(scenario())

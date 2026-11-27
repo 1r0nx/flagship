@@ -114,3 +114,13 @@ def test_auto_notes_option(tmp_path):
     p = tmp_path / "config.sh"
     p.write_text("URL=https://x.example\nCTFD_TOKEN=a\nAUTO_NOTES=true\n", encoding="utf-8")
     assert Config.load(p).auto_notes is True
+
+
+def test_flag_prefix_and_suffix_are_read(tmp_path):
+    p = tmp_path / "config.sh"
+    p.write_text("URL=https://x.example\nCTFD_TOKEN=a\nFLAG_PREFIX=HLB2026{\nFLAG_SUFFIX=}\n", encoding="utf-8")
+    cfg = Config.load(p)
+    assert cfg.flag_prefix == "HLB2026{" and cfg.flag_suffix == "}"
+    q = tmp_path / "empty.sh"
+    q.write_text("URL=https://x.example\nCTFD_TOKEN=a\n", encoding="utf-8")
+    assert Config.load(q).flag_suffix == ""

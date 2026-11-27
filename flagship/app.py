@@ -717,7 +717,7 @@ class Flagship(App):
                     with Vertical(id="rightcol"):
                         with VerticalScroll(id="detailwrap"):
                             yield Markdown("*Select a challenge on the left.*", id="detail")
-                        yield BeamInput(placeholder="Submit 🚩", id="flag", center=True)
+                        yield BeamInput(placeholder="Submit 🚩", id="flag", center=True, select_on_focus=False)
             with TabPane("Scoreboard", id="tab-score"):
                 yield DoubleClickDataTable(id="scoreboard")
                 # sticky one-line reminder of your own rank, shown at the bottom while your real
@@ -2335,12 +2335,22 @@ class Flagship(App):
         self.notifications_worker()
         self.refresh_cached_solves_worker()
 
+    def _reset_flag_field(self, inp: Input) -> None:
+        """Put the flag field back to its template: prefix + cursor + suffix (empty when none is set)."""
+        prefix, suffix = self.cfg.flag_prefix, self.cfg.flag_suffix
+        inp.value = prefix + suffix
+        inp.cursor_position = len(prefix)
+
     def action_focus_flag(self) -> None:
         try:  # the flag field lives in the Challenges tab: switch to it first
             self.query_one(TabbedContent).active = "tab-chal"
         except Exception:  # noqa: BLE001
             pass
-        self.query_one("#flag", Input).focus()
+        inp = self.query_one("#flag", Input)
+        prefix, suffix = self.cfg.flag_prefix, self.cfg.flag_suffix
+        if (prefix or suffix) and not (inp.value.startswith(prefix) and inp.value.endswith(suffix)):
+            self._reset_flag_field(inp)  # e.g. HLB2026{|} : you only type what goes between the braces
+        inp.focus()
 
     # -- download / sync ------------------------------------------
     def action_download(self) -> None:
@@ -2583,8 +2593,8 @@ class Flagship(App):
         if event.input.id != "flag":
             return
         flag = event.value.strip()
-        if not flag:
-            return
+        if not flag or flag == self.cfg.flag_prefix + self.cfg.flag_suffix:
+            return  # nothing typed between the template parts: do not send an empty flag
         if not self.selected:
             self.notify("Select a challenge first.", severity="warning")
             return
@@ -2596,7 +2606,7 @@ class Flagship(App):
         # already rejected once: no confirmation window, just the "already tried" message
         if store.was_attempted(self.cfg.base_dir, cid, flag):
             self._emit(f"⚠️ {label}: flag already tried (incorrect), not resubmitted: {flag}", "warning", 6)
-            event.input.value = ""
+            self._reset_flag_field(event.input)
             return
         # limited-attempts challenge: confirm before spending one. max_attempts lives on the
         # loaded detail; merge it over the list row (which may not carry it yet).
@@ -2611,7 +2621,7 @@ class Flagship(App):
             inp = event.input
             def _confirm_submit(ok: bool, cid=cid, flag=flag, path=path, label=label, inp=inp) -> None:
                 if ok:
-                    inp.value = ""
+                    self._reset_flag_field(inp)
                     self.submit_worker(cid, flag, path, label)
             self.push_screen(
                 ConfirmScreen(
@@ -2621,7 +2631,7 @@ class Flagship(App):
                 _confirm_submit)
             return
         self.submit_worker(cid, flag, path, label)
-        event.input.value = ""
+        self._reset_flag_field(event.input)
 
     @work(thread=True, exclusive=True, group="submit")
     def submit_worker(self, cid: int, flag: str, path: str, label: str = "") -> None:
